@@ -1,0 +1,31 @@
+__pycache__/
+*.pyc
+.env
+*.tmp
+최소화검토output/
+
+# 가상환경
+.venv/
+
+# Streamlit secrets (API 키 보호)
+.streamlit/secrets.toml
+
+# 대용량/임시 파일
+*.xlsx
+*.zip
+*.html
+*.log
+
+# IDE/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code 설정
+.claude/
+
+# 세션 로그/문서
+*.txt
+*.docx
+SPRINT_2_PLAN.md
