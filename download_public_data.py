@@ -1035,6 +1035,10 @@ def _fetch_construction_from_bok(start_ym, end_ym):
         df = pd.DataFrame(all_rows)
         df = df.dropna(subset=["시도"])
 
+        if df.empty:
+            print(f"  {stat_code}: 시도 매핑 후 데이터 없음, 다음 코드 시도")
+            continue
+
         # 착공/준공 구분이 있는 경우 피벗
         if df["구분"].notna().any():
             df_filtered = df.dropna(subset=["구분"])
