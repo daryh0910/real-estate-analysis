@@ -123,23 +123,31 @@ NPS_USECOLS = [
 
 
 def _find_nps_files():
-    """NPS CSV 파일 탐색 (합본 → 개별 파일 순)"""
+    """NPS CSV 파일 탐색 (합본 + 합본 이후 개별 파일 모두 반환)"""
+    result_files = []
+
     # 1) 합본 파일
     merged = os.path.join(NPS_DIR, "combine_NPS", "merged2_files.csv")
     if os.path.exists(merged):
-        return [merged]
+        result_files.append(merged)
 
-    # 2) 개별 월별 파일
-    patterns = [
-        os.path.join(NPS_DIR, "국민연금*_*.csv"),
-        os.path.join(NPS_DIR, "*.csv"),
-    ]
-    for pat in patterns:
-        files = sorted(_glob.glob(pat))
-        if files:
-            return files
+    # 2) 개별 파일 (합본에 포함되지 않은 최신 파일 추가)
+    individual = sorted(_glob.glob(os.path.join(NPS_DIR, "국민연금*.csv")))
+    # 합본이 있으면 합본 이후 파일만 추가 (파일명에 2024 이후 포함)
+    if result_files:
+        for f in individual:
+            fname = os.path.basename(f)
+            if "2024" in fname or "2025" in fname or "2026" in fname:
+                result_files.append(f)
+    else:
+        result_files = individual if individual else []
 
-    return []
+    if not result_files:
+        # fallback: 모든 csv
+        all_csv = sorted(_glob.glob(os.path.join(NPS_DIR, "*.csv")))
+        return all_csv
+
+    return result_files
 
 
 def process_nps_data(chunksize=200_000):
