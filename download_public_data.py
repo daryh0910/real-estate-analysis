@@ -45,11 +45,9 @@ BASE_ONEDRIVE = _detect_onedrive()
 BACKDATA = os.path.join(BASE_ONEDRIVE, "실거래_데이터/BackData(거래이외 Table)")
 OUTPUT_DIR = os.path.join(BACKDATA, "수요/수요_집계")
 
-# data.go.kr API 키 (디코딩된 원본 키 사용 — requests가 자동 인코딩)
-DATA_GO_KR_KEY = "REMOVED_DATA_GO_KR_KEY"
-
-# BOK ECOS API 키 (기존 download_demand_data.py에서 가져옴)
-BOK_API_KEY = "REMOVED_BOK_KEY"
+# API 키 — 환경변수 또는 .env 파일에서 로드
+DATA_GO_KR_KEY = os.environ.get("DATA_GO_KR_KEY", "")
+BOK_API_KEY = os.environ.get("BOK_API_KEY", "")
 BOK_BASE_URL = "https://ecos.bok.or.kr/api"
 
 # 시도코드 매핑
