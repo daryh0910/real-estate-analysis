@@ -18,11 +18,13 @@ import sys
 import time
 import json
 import argparse
-import base64
 import requests
 import pandas as pd
 import numpy as np
 import glob as _glob
+
+from dotenv import load_dotenv
+load_dotenv()
 
 
 # ═══════════════════════════════════════════════════════
