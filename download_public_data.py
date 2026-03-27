@@ -27,6 +27,9 @@ import numpy as np
 import glob as _glob
 import xml.etree.ElementTree as ET
 
+from dotenv import load_dotenv
+load_dotenv()
+
 
 # ═══════════════════════════════════════════════════════
 # 경로 / 상수
