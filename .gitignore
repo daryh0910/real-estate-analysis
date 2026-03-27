@@ -30,3 +30,6 @@ Thumbs.db
 !requirements.txt
 *.docx
 SPRINT_2_PLAN.md
+
+# 작업 계획
+plans/
