@@ -7,3 +7,4 @@ statsmodels
 pyarrow
 scikit-learn
 requests
+python-dotenv
