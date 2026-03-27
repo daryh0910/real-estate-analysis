@@ -18,12 +18,8 @@ import glob as _glob
 # 설정
 # ============================================================
 
-# API Key (URL-encoded 상태로 입력, 이중 인코딩 방지)
-# 환경변수 MOLIT_API_KEY 또는 아래 직접 입력
-API_KEY = os.environ.get(
-    "MOLIT_API_KEY",
-    "REMOVED_MOLIT_KEY",
-)
+# API Key — 환경변수에서 로드 (URL-encoded 상태로 설정)
+API_KEY = os.environ.get("MOLIT_API_KEY", "")
 
 # 날짜 범위
 START_YM = 202402
