@@ -60,7 +60,11 @@ SIDO_CODE_MAP = {
 
 
 def _get_kosis_key():
-    """KOSIS API 키를 엑셀에서 추출 (fallback: 하드코딩 base64)"""
+    """KOSIS API 키를 환경변수에서 로드"""
+    key = os.environ.get("KOSIS_API_KEY", "")
+    if key:
+        return key
+    # 로컬 엑셀 파일에서 추출 시도 (fallback)
     try:
         import openpyxl
         wb = openpyxl.load_workbook(KEY_XLSX, data_only=True)
@@ -73,9 +77,7 @@ def _get_kosis_key():
                             return str(row[j])
     except Exception:
         pass
-    return base64.b64decode(
-        "REMOVED_KOSIS_KEY_B64"
-    ).decode()
+    raise ValueError("KOSIS_API_KEY 환경변수를 설정하세요. (.env 파일 또는 export KOSIS_API_KEY=...)")
 
 
 # ═══════════════════════════════════════════════════════
