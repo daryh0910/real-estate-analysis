@@ -46,7 +46,7 @@ KEY_XLSX = os.path.join(
     BASE_ONEDRIVE, "5. coding/##. 250719_전달파일/250711_주요인증키.xlsx"
 )
 
-BOK_API_KEY = "REMOVED_BOK_KEY"
+BOK_API_KEY = os.environ.get("BOK_API_KEY", "")
 BOK_BASE_URL = "https://ecos.bok.or.kr/api"
 
 # 시도코드(앞 2자리) → 짧은 시도명
