@@ -2,10 +2,9 @@
 
 ## 프로젝트 개요
 부동산 실거래 데이터 + 거시경제 지표를 결합한 **Streamlit 기반 분석 대시보드**.
-건설회사 대표(방음터널/교량배수 전문)의 투자 판단을 지원하는 플랫폼.
 
 ## 기술 스택
-- **런타임**: Python 3.12 (WSL2 venv)
+- **런타임**: Python 3.12+
 - **프레임워크**: Streamlit
 - **시각화**: Plotly
 - **통계/ML**: scipy, statsmodels, scikit-learn
@@ -23,6 +22,7 @@ real_estate_analysis/
 ├── update_data.py            # 실거래 데이터 업데이트
 ├── build_cache.py            # Parquet 캐시 빌더
 ├── requirements.txt          # Python 의존성
+├── .env.example              # 환경변수 템플릿
 ├── cache/                    # Parquet 캐시 파일
 └── .streamlit/               # Streamlit 설정
 ```
@@ -46,35 +46,11 @@ real_estate_analysis/
 | ✅ | 국민연금(NPS) | 국민연금공단 CSV |
 | ✅ | 주담대, 가계자산 | BOK ECOS / KOSIS API |
 | ✅ | 미분양, 금리, 전월세전환율, 주택가격지수, 지가변동률 | BOK ECOS API |
-| 🔧 | 인구이동(전입/전출) | 수집함수 작성완료, 재실행 필요 |
-| 🔧 | 착공/준공 실적 | 수집함수 작성완료, 재실행 필요 |
-| ❌ | 청약 경쟁률 | Phase 2 이관 |
+| 🔧 | 인구이동(전입/전출) | 수집함수 작성완료 |
+| 🔧 | 착공/준공 실적 | 수집함수 작성완료 |
 
-## 실행 방법
-```bash
-# 환경 설정
-cd real_estate_analysis
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# 데이터 수집 (최초 또는 갱신 시)
-python download_public_data.py --all
-python download_demand_data.py
-python update_data.py
-
-# 대시보드 실행
-streamlit run app.py
-```
-
-## 개발 히스토리
-- **2025-02** — 1차 구축: 5개 탭 + 8종 데이터
-- **2026-03-12/13** — Phase A/B 확장: 17종 데이터 + 9개 탭 (회귀/이상치/클러스터/Granger 추가)
-- **2026-03-19** — Sprint 2 시작: Phase C (실용성/인프라) 집중
-
-## 현재 이슈
-- venv 패키지 미설치 상태 (streamlit, plotly, scipy 등)
-- 인구이동/착공준공 데이터 수집 스크립트 재실행 필요
-- data.go.kr API Key: requirements에 별도 관리 필요 (환경변수화 권장)
+## 환경변수 설정
+`.env.example`을 `.env`로 복사 후 API 키를 입력하세요.
 
 ## 코딩 규칙
 - 한글 변수명 사용 가능 (데이터프레임 컬럼)
