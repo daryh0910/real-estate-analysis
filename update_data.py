@@ -14,6 +14,9 @@ import json
 import time
 import glob as _glob
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # ============================================================
 # 설정
 # ============================================================
