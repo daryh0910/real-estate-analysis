@@ -1010,21 +1010,21 @@ def _fetch_construction_from_kosis(start_ym, end_ym):
                 "jsonVD": "Y",
             }
 
-        try:
-            resp = _api_get(kosis_url, params=params)
-            data = resp.json()
-        except Exception as e:
-            print(f"    API 요청 실패: {e}")
-            continue
+            try:
+                resp = _api_get(kosis_url, params=params)
+                data = resp.json()
+            except Exception as e:
+                print(f"    {year} API 요청 실패: {e}")
+                continue
 
-        if not isinstance(data, list) or len(data) == 0:
-            err_msg = data.get("errMsg", "") if isinstance(data, dict) else ""
-            print(f"    응답 없음: {err_msg}")
-            continue
+            if not isinstance(data, list) or len(data) == 0:
+                err_msg = data.get("errMsg", "") if isinstance(data, dict) else ""
+                print(f"    {year} 응답 없음: {err_msg}")
+                continue
 
-        print(f"    {len(data)}행 수신")
+            print(f"    {year}: {len(data)}행")
 
-        for row in data:
+            for row in data:
             region = row.get("C1_NM", "").strip()
             housing_type = row.get("C2_NM", "").strip()
             prd = row.get("PRD_DE", "")
