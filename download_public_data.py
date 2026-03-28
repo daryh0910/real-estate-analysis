@@ -943,15 +943,19 @@ def fetch_land_price_change(start_ym="201201", end_ym="202602"):
 
 def fetch_construction_pipeline(start_ym="201501", end_ym="202602"):
     """
-    주택건설실적 (착공/준공) → 시도별 월별
-    1차: BOK ECOS API — 901Y070 (주택건설실적)
-    2차: data.go.kr API — 착공(getHouseStartInfo) / 준공(getHouseComplInfo)
+    주택건설실적 (착공/준공) → 시도별 월별, 아파트/비아파트 구분
+    KOSIS API 사용 (주택유형별 착공/준공 실적)
     출력: {OUTPUT_DIR}/construction_pipeline_sido_monthly.csv
     """
     print("=" * 60)
-    print("[7] 주택건설실적(착공/준공) 수집")
+    print("[7] 주택건설실적(착공/준공) 수집 — KOSIS")
     print("=" * 60)
 
+    result = _fetch_construction_from_kosis(start_ym, end_ym)
+    if result is not None:
+        return result
+
+    print("  KOSIS 실패, BOK ECOS 시도...")
     result = _fetch_construction_from_bok(start_ym, end_ym)
     if result is not None:
         return result
