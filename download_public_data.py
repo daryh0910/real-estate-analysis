@@ -983,38 +983,30 @@ def _fetch_construction_from_kosis(start_ym, end_ym):
 
     all_rows = []
 
-    # KOSIS 40,000셀 제한 → 2년 단위로 분할 요청
-    start_y = int(start_ym[:4])
-    end_y = int(end_ym[:4])
-    end_m = end_ym[4:6]
-    periods = []
-    y = start_y
-    while y <= end_y:
-        p_start = f"{y}01" if y > start_y else start_ym
-        p_end = f"{min(y + 1, end_y)}{end_m if min(y + 1, end_y) == end_y else '12'}"
-        if int(p_start) <= int(p_end):
-            periods.append((p_start, p_end))
-        y += 2
+    # C2 코드: 아파트 + 계(가구수기준) 만 필터 → 40,000셀 제한 회피
+    # 착공/준공 테이블의 C2 코드 (DT_MLTM_5387, DT_MLTM_5373 공통)
+    c2_apt = "13102766969B.0006"   # 아파트
+    c2_total = "13102766969B.0002"  # 계(다가구가구수기준)
+    c2_filter = f"{c2_apt}+{c2_total}"
 
     for tbl_id, category in tables:
-        print(f"  [{category}] KOSIS {tbl_id} ({len(periods)}구간 분할)")
-        for p_start, p_end in periods:
-            params = {
-                "method": "getList",
-                "apiKey": kosis_key,
-                "itmId": "ALL",
-                "objL1": "ALL",
-                "objL2": "ALL",
-                "objL3": "ALL",
-                "objL4": "ALL",
-                "prdSe": "M",
-                "startPrdDe": p_start,
-                "endPrdDe": p_end,
-                "orgId": "116",
-                "tblId": tbl_id,
-                "format": "json",
-                "jsonVD": "Y",
-            }
+        print(f"  [{category}] KOSIS {tbl_id} (아파트+계 필터)")
+        params = {
+            "method": "getList",
+            "apiKey": kosis_key,
+            "itmId": "ALL",
+            "objL1": "ALL",
+            "objL2": c2_filter,
+            "objL3": "ALL",
+            "objL4": "ALL",
+            "prdSe": "M",
+            "startPrdDe": start_ym,
+            "endPrdDe": end_ym,
+            "orgId": "116",
+            "tblId": tbl_id,
+            "format": "json",
+            "jsonVD": "Y",
+        }
 
             try:
                 resp = _api_get(kosis_url, params=params)
