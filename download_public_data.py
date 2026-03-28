@@ -965,8 +965,138 @@ def fetch_construction_pipeline(start_ym="201501", end_ym="202602"):
     return _fetch_construction_from_datagokr(start_ym, end_ym)
 
 
+def _fetch_construction_from_kosis(start_ym, end_ym):
+    """KOSIS에서 주택유형별 착공/준공 실적 조회 (아파트/비아파트 구분)"""
+    import os as _os
+    kosis_key = _os.environ.get("KOSIS_API_KEY", "")
+    if not kosis_key:
+        print("  KOSIS_API_KEY 환경변수 없음")
+        return None
+
+    kosis_url = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
+
+    # 착공: DT_MLTM_5387, 준공: DT_MLTM_5373
+    tables = [
+        ("DT_MLTM_5387", "착공"),
+        ("DT_MLTM_5373", "준공"),
+    ]
+
+    all_rows = []
+
+    for tbl_id, category in tables:
+        print(f"  [{category}] KOSIS {tbl_id} 요청 중...")
+        params = {
+            "method": "getList",
+            "apiKey": kosis_key,
+            "itmId": "ALL",
+            "objL1": "ALL",
+            "objL2": "ALL",
+            "objL3": "ALL",
+            "objL4": "ALL",
+            "prdSe": "M",
+            "startPrdDe": start_ym,
+            "endPrdDe": end_ym,
+            "orgId": "116",
+            "tblId": tbl_id,
+            "format": "json",
+            "jsonVD": "Y",
+        }
+
+        try:
+            resp = _api_get(kosis_url, params=params)
+            data = resp.json()
+        except Exception as e:
+            print(f"    API 요청 실패: {e}")
+            continue
+
+        if not isinstance(data, list) or len(data) == 0:
+            err_msg = data.get("errMsg", "") if isinstance(data, dict) else ""
+            print(f"    응답 없음: {err_msg}")
+            continue
+
+        print(f"    {len(data)}행 수신")
+
+        for row in data:
+            region = row.get("C1_NM", "").strip()
+            housing_type = row.get("C2_NM", "").strip()
+            prd = row.get("PRD_DE", "")
+            value_str = row.get("DT", "")
+
+            if not region or not prd or len(prd) < 6:
+                continue
+
+            # 유형 분류: 아파트 / 비아파트 / 전체
+            if housing_type == "아파트":
+                type_label = "아파트"
+            elif "계" in housing_type:
+                type_label = "전체"
+            else:
+                type_label = "비아파트"
+
+            try:
+                value = float(value_str.replace(",", ""))
+            except (ValueError, AttributeError):
+                value = 0
+
+            ym = prd[:4] + "-" + prd[4:6]
+
+            all_rows.append({
+                "연월": ym,
+                "시도_raw": region,
+                "구분": category,
+                "유형": type_label,
+                "호수": value,
+            })
+
+    if not all_rows:
+        print("  KOSIS 데이터 없음")
+        return None
+
+    df = pd.DataFrame(all_rows)
+    df["시도"] = df["시도_raw"].map(SIDO_NORM)
+    df = df.dropna(subset=["시도"])
+
+    # 비아파트는 합산 (단독+연립+다세대)
+    agg = df.groupby(["연월", "시도", "구분", "유형"])["호수"].sum().reset_index()
+
+    # 피벗: 착공_아파트, 착공_비아파트, 착공_전체, 준공_아파트, ...
+    agg["col_name"] = agg["구분"] + "_" + agg["유형"]
+    pivot = agg.pivot_table(
+        index=["연월", "시도"],
+        columns="col_name",
+        values="호수",
+        aggfunc="sum",
+    ).reset_index()
+    pivot.columns.name = None
+
+    # 기존 호환: 착공_호수 = 착공_전체, 준공_호수 = 준공_전체
+    if "착공_전체" in pivot.columns:
+        pivot["착공_호수"] = pivot["착공_전체"]
+    if "준공_전체" in pivot.columns:
+        pivot["준공_호수"] = pivot["준공_전체"]
+
+    # 연도, 월 추가
+    pivot["연도"] = pivot["연월"].str[:4].astype(int)
+    pivot["월"] = pivot["연월"].str[5:7].astype(int)
+
+    pivot = pivot.sort_values(["연월", "시도"]).reset_index(drop=True)
+
+    # 저장
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, "construction_pipeline_sido_monthly.csv")
+    pivot.to_csv(out_path, index=False, encoding="utf-8-sig")
+    print(f"  저장: {out_path}")
+    print(f"    행 수: {len(pivot):,}, 시도 수: {pivot['시도'].nunique()}, "
+          f"기간: {pivot['연월'].min()} ~ {pivot['연월'].max()}")
+
+    cols = [c for c in pivot.columns if "착공" in c or "준공" in c]
+    print(f"    컬럼: {cols}")
+
+    return pivot
+
+
 def _fetch_construction_from_bok(start_ym, end_ym):
-    """BOK ECOS에서 주택건설실적(착공/준공) 조회"""
+    """BOK ECOS에서 주택건설실적(착공/준공) 조회 — fallback"""
     # 여러 통계코드를 시도 (주택건설실적 관련)
     bok_codes = ["901Y070", "901Y071", "104Y016"]
 
