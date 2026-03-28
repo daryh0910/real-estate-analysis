@@ -411,6 +411,10 @@ def load_rent_data(rent_type="jeonse", chunksize=500_000, keep_sido=True, force_
     if (not force_rebuild) and os.path.exists(cache_path):
         return pd.read_parquet(cache_path)
 
+    # Cloud 환경: 캐시도 없고 원본 CSV도 없으면 빈 DataFrame 반환
+    if not os.path.exists(JEONSE_PATH):
+        return pd.DataFrame()
+
     chunks = []
     reader = read_csv_auto(
         JEONSE_PATH,
