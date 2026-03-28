@@ -473,11 +473,10 @@ def fetch_bok_housing_loan(start_ym="200612", end_ym="202602"):
 
 KOSIS_API_URL = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
 
-# 가계금융복지조사 후보 테이블 ID (순서대로 시도)
+# 가계금융복지조사 후보 테이블 ID (2017년 이후 신규 ID)
 KOSIS_HH_TABLES = [
-    ("101", "DT_10401N_003", "시도별 가구특성별 자산, 부채, 소득 현황"),
-    ("101", "DT_10401N_001", "가구특성별 자산, 부채, 소득 현황 (1)"),
-    ("101", "DT_10401N_004", "시도별 자산 현황"),
+    ("101", "DT_1HDAAA01", "지역별 자산, 부채, 소득 현황"),
+    ("101", "DT_1HDAAD01", "가구특성별 자산·부채"),
 ]
 
 
