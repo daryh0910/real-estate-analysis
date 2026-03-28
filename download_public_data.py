@@ -1022,37 +1022,37 @@ def _fetch_construction_from_kosis(start_ym, end_ym):
 
         print(f"    {len(data)}행 수신")
 
-            for row in data:
-                region = row.get("C1_NM", "").strip()
-                housing_type = row.get("C2_NM", "").strip()
-                prd = row.get("PRD_DE", "")
-                value_str = row.get("DT", "")
+        for row in data:
+            region = row.get("C1_NM", "").strip()
+            housing_type = row.get("C2_NM", "").strip()
+            prd = row.get("PRD_DE", "")
+            value_str = row.get("DT", "")
 
-                if not region or not prd or len(prd) < 6:
-                    continue
+            if not region or not prd or len(prd) < 6:
+                continue
 
-                # 유형 분류: 아파트 / 비아파트 / 전체
-                if housing_type == "아파트":
-                    type_label = "아파트"
-                elif "계" in housing_type:
-                    type_label = "전체"
-                else:
-                    type_label = "비아파트"
+            # 유형 분류: 아파트 / 전체(계)
+            if housing_type == "아파트":
+                type_label = "아파트"
+            elif "계" in housing_type:
+                type_label = "전체"
+            else:
+                continue  # 아파트+계만 필터했으므로 이 경우는 없음
 
-                try:
-                    value = float(value_str.replace(",", ""))
-                except (ValueError, AttributeError):
-                    value = 0
+            try:
+                value = float(value_str.replace(",", ""))
+            except (ValueError, AttributeError):
+                value = 0
 
-                ym = prd[:4] + "-" + prd[4:6]
+            ym = prd[:4] + "-" + prd[4:6]
 
-                all_rows.append({
-                    "연월": ym,
-                    "시도_raw": region,
-                    "구분": category,
-                    "유형": type_label,
-                    "호수": value,
-                })
+            all_rows.append({
+                "연월": ym,
+                "시도_raw": region,
+                "구분": category,
+                "유형": type_label,
+                "호수": value,
+            })
 
     if not all_rows:
         print("  KOSIS 데이터 없음")
