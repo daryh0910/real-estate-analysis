@@ -252,6 +252,10 @@ def load_apt_data(chunksize=500_000, keep_sido=True, force_rebuild=False):
     if (not force_rebuild) and os.path.exists(APT_CACHE_PARQUET):
         return pd.read_parquet(APT_CACHE_PARQUET)
 
+    # Cloud 환경: 캐시도 없고 원본 CSV도 없으면 빈 DataFrame 반환
+    if not os.path.exists(APT_PATH):
+        return pd.DataFrame()
+
     chunks = []
     reader = read_csv_auto(
         APT_PATH,
