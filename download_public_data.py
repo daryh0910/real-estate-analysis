@@ -983,27 +983,27 @@ def _fetch_construction_from_kosis(start_ym, end_ym):
 
     all_rows = []
 
-    # KOSIS 40,000셀 제한 → 1년 단위로 분할 요청
-    start_y = int(start_ym[:4])
-    end_y = int(end_ym[:4])
-    end_m = end_ym[4:6]
+    # objL2/L3/L4를 특정 코드로 지정하여 40,000셀 제한 회피
+    # 아파트와 계(전체)를 각각 요청
+    type_filters = [
+        ("아파트", "13102766969B.0006", "13102766969C.0007", "13102766969D.0008"),
+        ("전체",   "13102766969B.0002", "13102766969C.0002", "13102766969D.0002"),
+    ]
 
     for tbl_id, category in tables:
-        print(f"  [{category}] KOSIS {tbl_id} ({end_y - start_y + 1}년 분할)")
-        for year in range(start_y, end_y + 1):
-            p_start = start_ym if year == start_y else f"{year}01"
-            p_end = end_ym if year == end_y else f"{year}12"
+        for type_label, l2, l3, l4 in type_filters:
+            print(f"  [{category}_{type_label}] KOSIS {tbl_id}")
             params = {
                 "method": "getList",
                 "apiKey": kosis_key,
                 "itmId": "ALL",
                 "objL1": "ALL",
-                "objL2": "ALL",
-                "objL3": "ALL",
-                "objL4": "ALL",
+                "objL2": l2,
+                "objL3": l3,
+                "objL4": l4,
                 "prdSe": "M",
-                "startPrdDe": p_start,
-                "endPrdDe": p_end,
+                "startPrdDe": start_ym,
+                "endPrdDe": end_ym,
                 "orgId": "116",
                 "tblId": tbl_id,
                 "format": "json",
@@ -1014,32 +1014,23 @@ def _fetch_construction_from_kosis(start_ym, end_ym):
                 resp = _api_get(kosis_url, params=params)
                 data = resp.json()
             except Exception as e:
-                print(f"    {year} API 요청 실패: {e}")
+                print(f"    API 요청 실패: {e}")
                 continue
 
             if not isinstance(data, list) or len(data) == 0:
                 err_msg = data.get("errMsg", "") if isinstance(data, dict) else ""
-                print(f"    {year} 응답 없음: {err_msg}")
+                print(f"    응답 없음: {err_msg}")
                 continue
 
-            print(f"    {year}: {len(data)}행")
+            print(f"    {len(data)}행 수신")
 
             for row in data:
                 region = row.get("C1_NM", "").strip()
-                housing_type = row.get("C2_NM", "").strip()
                 prd = row.get("PRD_DE", "")
                 value_str = row.get("DT", "")
 
                 if not region or not prd or len(prd) < 6:
                     continue
-
-                # 유형 분류: 아파트 / 전체(계)
-                if housing_type == "아파트":
-                    type_label = "아파트"
-                elif "계" in housing_type:
-                    type_label = "전체"
-                else:
-                    type_label = "비아파트"
 
                 try:
                     value = float(value_str.replace(",", ""))
@@ -1056,7 +1047,7 @@ def _fetch_construction_from_kosis(start_ym, end_ym):
                     "호수": value,
                 })
 
-            time.sleep(1)  # API rate limit 방지
+            time.sleep(1)
 
     if not all_rows:
         print("  KOSIS 데이터 없음")
