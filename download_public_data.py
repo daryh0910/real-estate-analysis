@@ -1030,7 +1030,7 @@ def _fetch_construction_from_kosis(start_ym, end_ym):
 
             print(f"    {p_start}~{p_end}: {len(data)}행")
 
-        for row in data:
+            for row in data:
             region = row.get("C1_NM", "").strip()
             housing_type = row.get("C2_NM", "").strip()
             prd = row.get("PRD_DE", "")
