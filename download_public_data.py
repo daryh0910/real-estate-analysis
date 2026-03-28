@@ -983,38 +983,52 @@ def _fetch_construction_from_kosis(start_ym, end_ym):
 
     all_rows = []
 
+    # KOSIS 40,000셀 제한 → 2년 단위로 분할 요청
+    start_y = int(start_ym[:4])
+    end_y = int(end_ym[:4])
+    end_m = end_ym[4:6]
+    periods = []
+    y = start_y
+    while y <= end_y:
+        p_start = f"{y}01" if y > start_y else start_ym
+        p_end = f"{min(y + 1, end_y)}{end_m if min(y + 1, end_y) == end_y else '12'}"
+        if int(p_start) <= int(p_end):
+            periods.append((p_start, p_end))
+        y += 2
+
     for tbl_id, category in tables:
-        print(f"  [{category}] KOSIS {tbl_id} 요청 중...")
-        params = {
-            "method": "getList",
-            "apiKey": kosis_key,
-            "itmId": "ALL",
-            "objL1": "ALL",
-            "objL2": "ALL",
-            "objL3": "ALL",
-            "objL4": "ALL",
-            "prdSe": "M",
-            "startPrdDe": start_ym,
-            "endPrdDe": end_ym,
-            "orgId": "116",
-            "tblId": tbl_id,
-            "format": "json",
-            "jsonVD": "Y",
-        }
+        print(f"  [{category}] KOSIS {tbl_id} ({len(periods)}구간 분할)")
+        for p_start, p_end in periods:
+            params = {
+                "method": "getList",
+                "apiKey": kosis_key,
+                "itmId": "ALL",
+                "objL1": "ALL",
+                "objL2": "ALL",
+                "objL3": "ALL",
+                "objL4": "ALL",
+                "prdSe": "M",
+                "startPrdDe": p_start,
+                "endPrdDe": p_end,
+                "orgId": "116",
+                "tblId": tbl_id,
+                "format": "json",
+                "jsonVD": "Y",
+            }
 
-        try:
-            resp = _api_get(kosis_url, params=params)
-            data = resp.json()
-        except Exception as e:
-            print(f"    API 요청 실패: {e}")
-            continue
+            try:
+                resp = _api_get(kosis_url, params=params)
+                data = resp.json()
+            except Exception as e:
+                print(f"    {p_start}~{p_end} 요청 실패: {e}")
+                continue
 
-        if not isinstance(data, list) or len(data) == 0:
-            err_msg = data.get("errMsg", "") if isinstance(data, dict) else ""
-            print(f"    응답 없음: {err_msg}")
-            continue
+            if not isinstance(data, list) or len(data) == 0:
+                err_msg = data.get("errMsg", "") if isinstance(data, dict) else ""
+                print(f"    {p_start}~{p_end} 응답 없음: {err_msg}")
+                continue
 
-        print(f"    {len(data)}행 수신")
+            print(f"    {p_start}~{p_end}: {len(data)}행")
 
         for row in data:
             region = row.get("C1_NM", "").strip()
