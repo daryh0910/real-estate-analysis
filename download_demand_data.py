@@ -504,7 +504,7 @@ def fetch_kosis_household_asset(start_year=2012, end_year=2024):
             "itmId": "ALL",
             "objL1": "ALL",
             "objL2": "ALL",
-            "objL3": " ",
+            "objL3": "ALL",
             "objL4": " ",
             "prdSe": "Y",
             "startPrdDe": str(start_year),
