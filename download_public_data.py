@@ -1075,11 +1075,17 @@ def _fetch_construction_from_kosis(start_ym, end_ym):
     ).reset_index()
     pivot.columns.name = None
 
-    # 기존 호환: 착공_호수 = 착공_전체, 준공_호수 = 준공_전체
+    # 기존 호환 + 비아파트 파생
     if "착공_전체" in pivot.columns:
         pivot["착공_호수"] = pivot["착공_전체"]
     if "준공_전체" in pivot.columns:
         pivot["준공_호수"] = pivot["준공_전체"]
+
+    # 비아파트 = 전체 - 아파트
+    if "착공_전체" in pivot.columns and "착공_아파트" in pivot.columns:
+        pivot["착공_비아파트"] = pivot["착공_전체"] - pivot["착공_아파트"]
+    if "준공_전체" in pivot.columns and "준공_아파트" in pivot.columns:
+        pivot["준공_비아파트"] = pivot["준공_전체"] - pivot["준공_아파트"]
 
     # 연도, 월 추가
     pivot["연도"] = pivot["연월"].str[:4].astype(int)
