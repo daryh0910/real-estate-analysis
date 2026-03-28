@@ -62,7 +62,7 @@ SIDO_CODE_MAP = {
 
 
 def _get_kosis_key():
-    """KOSIS API 키를 환경변수에서 로드"""
+    """KOSIS API 키를 환경변수에서 로드 (base64 인코딩 상태 그대로 사용)"""
     key = os.environ.get("KOSIS_API_KEY", "")
     if key:
         return key
