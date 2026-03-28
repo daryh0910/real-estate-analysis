@@ -983,30 +983,32 @@ def _fetch_construction_from_kosis(start_ym, end_ym):
 
     all_rows = []
 
-    # C2 코드: 아파트 + 계(가구수기준) 만 필터 → 40,000셀 제한 회피
-    # 착공/준공 테이블의 C2 코드 (DT_MLTM_5387, DT_MLTM_5373 공통)
-    c2_apt = "13102766969B.0006"   # 아파트
-    c2_total = "13102766969B.0002"  # 계(다가구가구수기준)
-    c2_filter = f"{c2_apt}+{c2_total}"
+    # KOSIS 40,000셀 제한 → 1년 단위로 분할 요청
+    start_y = int(start_ym[:4])
+    end_y = int(end_ym[:4])
+    end_m = end_ym[4:6]
 
     for tbl_id, category in tables:
-        print(f"  [{category}] KOSIS {tbl_id} (아파트+계 필터)")
-        params = {
-            "method": "getList",
-            "apiKey": kosis_key,
-            "itmId": "ALL",
-            "objL1": "ALL",
-            "objL2": c2_filter,
-            "objL3": "ALL",
-            "objL4": "ALL",
-            "prdSe": "M",
-            "startPrdDe": start_ym,
-            "endPrdDe": end_ym,
-            "orgId": "116",
-            "tblId": tbl_id,
-            "format": "json",
-            "jsonVD": "Y",
-        }
+        print(f"  [{category}] KOSIS {tbl_id} ({end_y - start_y + 1}년 분할)")
+        for year in range(start_y, end_y + 1):
+            p_start = start_ym if year == start_y else f"{year}01"
+            p_end = end_ym if year == end_y else f"{year}12"
+            params = {
+                "method": "getList",
+                "apiKey": kosis_key,
+                "itmId": "ALL",
+                "objL1": "ALL",
+                "objL2": "ALL",
+                "objL3": "ALL",
+                "objL4": "ALL",
+                "prdSe": "M",
+                "startPrdDe": p_start,
+                "endPrdDe": p_end,
+                "orgId": "116",
+                "tblId": tbl_id,
+                "format": "json",
+                "jsonVD": "Y",
+            }
 
         try:
             resp = _api_get(kosis_url, params=params)
