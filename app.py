@@ -32,19 +32,24 @@ def get_data():
     return load_all_data()
 
 
-data = get_data()
-apt_df = data["apt"]
-jeonse_df = data["jeonse"]
-wolse_df = data["wolse"]
-rent_all_df = data["rent_all"]
-pop_df = data["pop"]
-grdp_df = data["grdp"]
-permit_df = data["permit"]
+try:
+    data = get_data()
+except Exception as e:
+    st.error(f"데이터 로딩 실패: {e}")
+    data = {}
+
+apt_df = data.get("apt", pd.DataFrame())
+jeonse_df = data.get("jeonse", pd.DataFrame())
+wolse_df = data.get("wolse", pd.DataFrame())
+rent_all_df = data.get("rent_all", pd.DataFrame())
+pop_df = data.get("pop", pd.DataFrame())
+grdp_df = data.get("grdp", pd.DataFrame())
+permit_df = data.get("permit", pd.DataFrame())
 nps_df = data.get("nps", pd.DataFrame())
 loan_df = data.get("loan", pd.DataFrame())
 asset_df = data.get("asset", pd.DataFrame())
-yearly_df = data["yearly"]
-monthly_df = data["monthly"]
+yearly_df = data.get("yearly", pd.DataFrame())
+monthly_df = data.get("monthly", pd.DataFrame())
 
 # --- 사이드바 필터 ---
 st.sidebar.title("필터 설정")
