@@ -1,5 +1,5 @@
 """
-공공데이터 API 수집 스크립트 — 미분양, 인구이동, 기준금리, 전월세전환율, 주택건설실적, 지가변동률
+공공데이터 API 수집 스크립트 — 미분양, 인구이동, 기준금리, 전월세전환율, 주택건설실적, 지가변동률, CSI
 
 사용법:
     python download_public_data.py                # 전체 실행
@@ -8,6 +8,7 @@
     python download_public_data.py --rate         # 기준금리만
     python download_public_data.py --construction # 주택건설실적만
     python download_public_data.py --land-price   # 지가변동률만
+    python download_public_data.py --csi          # 소비자심리지수(CSI)만
 
 출력 파일:
     {DEMAND_DIR}/unsold_housing_sido_monthly.csv
@@ -15,6 +16,7 @@
     {DEMAND_DIR}/base_rate_monthly.csv
     {DEMAND_DIR}/construction_pipeline_sido_monthly.csv
     {DEMAND_DIR}/land_price_change_sido_monthly.csv
+    {DEMAND_DIR}/csi_monthly.csv
 """
 
 import os
