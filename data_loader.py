@@ -1132,6 +1132,7 @@ def load_all_data(force_rebuild=False):
         "nps": nps_df,
         "loan": loan_df,
         "asset": asset_df,
+        "nts": nts_df,
         "unsold": unsold_df,
         "land_price": land_price_df,
         "pop_migration": pop_migration_df,
