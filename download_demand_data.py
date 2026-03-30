@@ -20,6 +20,7 @@ import sys
 import time
 import json
 import argparse
+import subprocess
 import requests
 import pandas as pd
 import numpy as np
