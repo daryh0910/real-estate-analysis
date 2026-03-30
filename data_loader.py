@@ -958,6 +958,37 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
             asset_df[asset_merge_cols], on=["시도", "연도"], how="left"
         )
 
+    # 국세청 근로소득 데이터 병합 (시군구→시도 집계, 연간)
+    if nts_df is not None and not nts_df.empty:
+        nts_cols = ["총급여_인원", "총급여_금액", "1인당총급여_백만원", "1인당결정세액_백만원"]
+        nts_cols = [c for c in nts_cols if c in nts_df.columns]
+        if nts_cols and "시도" in nts_df.columns:
+            # 시군구→시도 집계: 인원/금액은 합산, 1인당은 가중평균
+            def _agg_nts_sido(df):
+                rows = []
+                for (sido, yr), g in df.groupby(["시도", "연도"]):
+                    row = {"시도": sido, "연도": yr}
+                    if "총급여_인원" in g.columns:
+                        row["총급여_인원"] = g["총급여_인원"].sum()
+                    if "총급여_금액" in g.columns:
+                        row["총급여_금액"] = g["총급여_금액"].sum()
+                    # 1인당 = 총금액/총인원
+                    if row.get("총급여_인원", 0) > 0 and row.get("총급여_금액", 0) > 0:
+                        row["1인당총급여_백만원"] = row["총급여_금액"] / row["총급여_인원"]
+                    if "결정세액_인원" in g.columns and "결정세액_금액" in g.columns:
+                        total_tax_pop = g["결정세액_인원"].sum()
+                        total_tax_amt = g["결정세액_금액"].sum()
+                        if total_tax_pop > 0:
+                            row["1인당결정세액_백만원"] = total_tax_amt / total_tax_pop
+                    rows.append(row)
+                return pd.DataFrame(rows)
+
+            nts_sido = _agg_nts_sido(nts_df)
+            nts_merge_cols = ["시도", "연도"] + [c for c in nts_cols if c in nts_sido.columns]
+            merged = merged.merge(
+                nts_sido[nts_merge_cols], on=["시도", "연도"], how="left"
+            )
+
     # 미분양주택 데이터 병합 (시도, 월별)
     if unsold_df is not None and not unsold_df.empty:
         if freq == "yearly":
