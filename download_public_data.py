@@ -284,7 +284,7 @@ def _fetch_unsold_housing_alt(start_ym="200801", end_ym="202602"):
 # 2. 인구이동 (KOSIS API → 시도간 전입/전출)
 # ═══════════════════════════════════════════════════════
 
-def fetch_population_migration(start_year=2010, end_year=2025):
+def fetch_population_migration(start_year=2010, end_year=2026):
     """
     BOK ECOS API / data.go.kr → 시도별 월별 전입/전출 인구
     BOK 통계코드: 101Y008 (국내인구이동)
