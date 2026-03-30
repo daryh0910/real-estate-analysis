@@ -1,16 +1,18 @@
 """
-수요 데이터 수집 스크립트 — 소득(국민연금) · 대출(BOK) · 자산(KOSIS)
+수요 데이터 수집 스크립트 — 소득(국민연금) · 대출(BOK) · 자산(KOSIS) · 근로소득(국세청)
 
 사용법:
     python download_demand_data.py             # 전체 실행
     python download_demand_data.py --nps       # 국민연금만
     python download_demand_data.py --bok       # BOK 주담대만
     python download_demand_data.py --kosis     # KOSIS 가계자산만
+    python download_demand_data.py --nts       # 국세청 근로소득만
 
 출력 파일:
     {BACKDATA}/수요/수요_집계/nps_sigungu_monthly.csv
     {BACKDATA}/수요/수요_집계/bok_housing_loan_sido_monthly.csv
     {BACKDATA}/수요/수요_집계/kosis_household_asset_sido_yearly.csv
+    {BACKDATA}/수요/수요_집계/nts_income_sigungu_yearly.csv
 """
 
 import os
