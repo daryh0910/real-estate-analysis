@@ -7,11 +7,13 @@
     python download_demand_data.py --bok       # BOK 주담대만
     python download_demand_data.py --kosis     # KOSIS 가계자산만
     python download_demand_data.py --nts       # 국세청 근로소득만
+    python download_demand_data.py --quintile  # KOSIS 소득5분위별 가계자산만
 
 출력 파일:
     {BACKDATA}/수요/수요_집계/nps_sigungu_monthly.csv
     {BACKDATA}/수요/수요_집계/bok_housing_loan_sido_monthly.csv
     {BACKDATA}/수요/수요_집계/kosis_household_asset_sido_yearly.csv
+    {BACKDATA}/수요/수요_집계/kosis_household_asset_quintile_yearly.csv
     {BACKDATA}/수요/수요_집계/nts_income_sigungu_yearly.csv
 """
 
