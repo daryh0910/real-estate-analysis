@@ -1093,6 +1093,51 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
                     price_index_df[["시도", "연도", "월"] + pi_cols], on=["시도", "연도", "월"], how="left"
                 )
 
+    # 소비자심리지수(CSI) 병합 (전국, 월별 → 모든 시도에 동일 적용)
+    if csi_df is not None and not csi_df.empty:
+        csi_cols = [c for c in csi_df.columns if c not in ["연월", "연도", "월"]]
+        if csi_cols:
+            if freq == "yearly":
+                csi_yearly = csi_df[csi_df["월"] == 12][["연도"] + csi_cols].copy()
+                merged = merged.merge(csi_yearly, on=["연도"], how="left")
+            else:
+                merged = merged.merge(
+                    csi_df[["연도", "월"] + csi_cols], on=["연도", "월"], how="left"
+                )
+
+    # ── 파생지표 계산 ────────────────────────────────────────────
+    _safe = lambda col: merged[col].replace(0, np.nan)
+
+    # 전세가율 (%)
+    if "전세_보증금평균" in merged.columns and "평균가격" in merged.columns:
+        merged["전세가율"] = merged["전세_보증금평균"] / _safe("평균가격") * 100
+
+    # PIR — 가계자산 소득 기반 (배)
+    if "가구_소득평균" in merged.columns and "평균가격" in merged.columns:
+        merged["PIR"] = merged["평균가격"] / _safe("가구_소득평균")
+
+    # PIR — NPS 기반 (배): NPS 1인당고지금액(원) → 연소득(만원) = 고지금액×12/10000
+    if "NPS_1인당고지금액" in merged.columns and "평균가격" in merged.columns:
+        nps_annual_income = merged["NPS_1인당고지금액"] * 12 / 10000
+        merged["PIR_NPS"] = merged["평균가격"] / nps_annual_income.replace(0, np.nan)
+
+    # 매매 거래회전율 (‰)
+    if "거래량" in merged.columns and "총인구" in merged.columns:
+        merged["매매_거래회전율"] = merged["거래량"] / _safe("총인구") * 1000
+
+    # 전세 거래회전율 (‰)
+    if "전세_거래량" in merged.columns and "총인구" in merged.columns:
+        merged["전세_거래회전율"] = merged["전세_거래량"] / _safe("총인구") * 1000
+
+    # 가격변화율 YoY (%) — 시도별 전년대비
+    if freq == "yearly" and "평균가격" in merged.columns:
+        merged = merged.sort_values(["시도", "연도"])
+        merged["가격변화율_YoY"] = merged.groupby("시도")["평균가격"].pct_change() * 100
+
+    # 소득대비대출 (배): 주담대_잔액(십억원)→만원 / 가구_소득평균(만원)
+    if "주담대_잔액" in merged.columns and "가구_소득평균" in merged.columns:
+        merged["소득대비대출"] = (merged["주담대_잔액"] * 100000) / _safe("가구_소득평균")
+
     return merged
 
 
