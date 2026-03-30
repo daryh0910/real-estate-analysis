@@ -1188,6 +1188,123 @@ def fetch_nts_income_data(start_year=2016, end_year=2024):
 
 
 # ═══════════════════════════════════════════════════════
+# KB부동산 수급 데이터 (PublicDataReader)
+# ═══════════════════════════════════════════════════════
+
+# KB 지역명 → 프로젝트 시도명 매핑
+_KB_SIDO_MAP = {
+    "서울": "서울", "부산": "부산", "대구": "대구", "인천": "인천",
+    "광주": "광주", "대전": "대전", "울산": "울산", "세종": "세종",
+    "경기": "경기", "강원": "강원", "충북": "충북", "충남": "충남",
+    "전북": "전북", "전남": "전남", "경북": "경북", "경남": "경남",
+    "제주": "제주",
+}
+
+
+def fetch_kb_market_data():
+    """
+    KB부동산 매수우위지수 + 전세수급동향 + 매매거래동향 수집
+    PublicDataReader 라이브러리 사용 (API 키 불필요)
+    """
+    try:
+        from PublicDataReader import Kbland
+    except ImportError:
+        print("  PublicDataReader 미설치. pip install PublicDataReader")
+        return None
+
+    print("=" * 60)
+    print("[KB] KB부동산 수급 데이터 수집")
+    print("=" * 60)
+
+    api = Kbland()
+    frames = []
+
+    # (1) 매수우위지수 (메뉴코드=01, 월간)
+    print("  매수우위지수 수집 중...")
+    try:
+        df_buy = api.get_market_trend(
+            메뉴코드="01", 월간주간구분코드="01", 매물종별구분="01", 기간="5"
+        )
+        df_buy = df_buy[df_buy["지역명"].isin(_KB_SIDO_MAP.keys())].copy()
+        df_buy["시도"] = df_buy["지역명"].map(_KB_SIDO_MAP)
+        df_buy["날짜"] = pd.to_datetime(df_buy["날짜"])
+        df_buy["연월"] = df_buy["날짜"].dt.strftime("%Y-%m")
+        df_buy = df_buy.rename(columns={"매수우위지수": "KB_매수우위지수"})
+        frames.append(df_buy[["시도", "연월", "KB_매수우위지수"]])
+        print(f"    {len(df_buy)}행, {df_buy['연월'].min()} ~ {df_buy['연월'].max()}")
+    except Exception as e:
+        print(f"    실패: {e}")
+
+    # (2) 매매거래동향 (메뉴코드=02, 월간)
+    print("  매매거래동향 수집 중...")
+    try:
+        df_trade = api.get_market_trend(
+            메뉴코드="02", 월간주간구분코드="01", 매물종별구분="01", 기간="5"
+        )
+        df_trade = df_trade[df_trade["지역명"].isin(_KB_SIDO_MAP.keys())].copy()
+        df_trade["시도"] = df_trade["지역명"].map(_KB_SIDO_MAP)
+        df_trade["날짜"] = pd.to_datetime(df_trade["날짜"])
+        df_trade["연월"] = df_trade["날짜"].dt.strftime("%Y-%m")
+        # 매매거래지수 컬럼명 확인
+        trade_col = "매매거래지수" if "매매거래지수" in df_trade.columns else None
+        if trade_col:
+            df_trade = df_trade.rename(columns={trade_col: "KB_매매거래지수"})
+            frames.append(df_trade[["시도", "연월", "KB_매매거래지수"]])
+            print(f"    {len(df_trade)}행")
+    except Exception as e:
+        print(f"    실패: {e}")
+
+    # (3) 전세수급동향 (메뉴코드=03, 월간)
+    print("  전세수급동향 수집 중...")
+    try:
+        df_jeonse = api.get_market_trend(
+            메뉴코드="03", 월간주간구분코드="01", 매물종별구분="01", 기간="5"
+        )
+        df_jeonse = df_jeonse[df_jeonse["지역명"].isin(_KB_SIDO_MAP.keys())].copy()
+        df_jeonse["시도"] = df_jeonse["지역명"].map(_KB_SIDO_MAP)
+        df_jeonse["날짜"] = pd.to_datetime(df_jeonse["날짜"])
+        df_jeonse["연월"] = df_jeonse["날짜"].dt.strftime("%Y-%m")
+        # 전세수급지수 컬럼 탐색
+        js_col = None
+        for c in df_jeonse.columns:
+            if "지수" in c or "전세" in c.lower():
+                if c not in ("메뉴코드", "월간주간구분", "지역코드", "지역명", "날짜", "시도", "연월"):
+                    js_col = c
+                    break
+        if js_col:
+            df_jeonse = df_jeonse.rename(columns={js_col: "KB_전세수급지수"})
+            frames.append(df_jeonse[["시도", "연월", "KB_전세수급지수"]])
+            print(f"    {len(df_jeonse)}행")
+        else:
+            print(f"    수급지수 컬럼 미발견: {list(df_jeonse.columns)}")
+    except Exception as e:
+        print(f"    실패: {e}")
+
+    if not frames:
+        print("  수집 실패")
+        return None
+
+    # 병합
+    result = frames[0]
+    for f in frames[1:]:
+        result = result.merge(f, on=["시도", "연월"], how="outer")
+
+    result["연도"] = result["연월"].str[:4].astype(int)
+    result["월"] = result["연월"].str[5:7].astype(int)
+    result = result.sort_values(["연월", "시도"]).reset_index(drop=True)
+
+    # 저장
+    out_path = os.path.join(OUTPUT_DIR, "kb_market_supply_demand_monthly.csv")
+    result.to_csv(out_path, index=False, encoding="utf-8-sig")
+    print(f"  저장: {out_path}")
+    print(f"    행 수: {len(result):,}, 시도 수: {result['시도'].nunique()}")
+    print(f"    기간: {result['연월'].min()} ~ {result['연월'].max()}")
+    print(f"    컬럼: {[c for c in result.columns if c.startswith('KB_')]}")
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════
 
