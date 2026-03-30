@@ -1005,11 +1005,12 @@ def fetch_nts_income_data(start_year=2016, end_year=2024):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="수요 데이터 수집: 소득(국민연금) · 대출(BOK) · 자산(KOSIS)"
+        description="수요 데이터 수집: 소득(국민연금) · 대출(BOK) · 자산(KOSIS) · 근로소득(국세청)"
     )
     parser.add_argument("--nps", action="store_true", help="국민연금 CSV 전처리만")
     parser.add_argument("--bok", action="store_true", help="BOK 주담대만")
     parser.add_argument("--kosis", action="store_true", help="KOSIS 가계자산만")
+    parser.add_argument("--nts", action="store_true", help="국세청 근로소득만")
     parser.add_argument(
         "--bok-start", default="200612", help="BOK 조회 시작월 (기본: 200612)"
     )
@@ -1022,9 +1023,15 @@ def main():
     parser.add_argument(
         "--kosis-end", type=int, default=2024, help="KOSIS 종료년도 (기본: 2024)"
     )
+    parser.add_argument(
+        "--nts-start", type=int, default=2016, help="국세청 시작년도 (기본: 2016)"
+    )
+    parser.add_argument(
+        "--nts-end", type=int, default=2024, help="국세청 종료년도 (기본: 2024)"
+    )
     args = parser.parse_args()
 
-    run_all = not (args.nps or args.bok or args.kosis)
+    run_all = not (args.nps or args.bok or args.kosis or args.nts)
 
     print(f"\n데이터 출력 디렉토리: {OUTPUT_DIR}\n")
 
@@ -1039,6 +1046,11 @@ def main():
     if run_all or args.kosis:
         results["kosis"] = fetch_kosis_household_asset(
             args.kosis_start, args.kosis_end
+        )
+
+    if run_all or args.nts:
+        results["nts"] = fetch_nts_income_data(
+            args.nts_start, args.nts_end
         )
 
     print("\n" + "=" * 60)
