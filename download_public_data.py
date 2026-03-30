@@ -1501,6 +1501,9 @@ def main():
     if run_all or args.construction:
         results["construction"] = fetch_construction_pipeline()
 
+    if run_all or args.csi:
+        results["csi"] = fetch_csi()
+
     print("\n" + "=" * 60)
     print("완료 요약:")
     for key, val in results.items():
