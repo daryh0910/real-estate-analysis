@@ -637,14 +637,18 @@ def fetch_kosis_household_asset(start_year=2012, end_year=2024):
         print(f"  항목 종류 ({len(items)}개): {list(items)[:20]}")
 
         # 항목 중 자산/부채/소득 키워드 매칭
+        # KOSIS DT_1HDAAA01 실제 항목명: "자산", "부채", "경상소득(전년도)", "순자산액"
         target_items = {}
         for item in items:
-            s = str(item)
-            if ("자산" in s and "총" in s) or s == "자산액":
+            s = str(item).strip()
+            # 자산: "자산", "총자산", "자산액" (단, 하위항목 "금융자산", "실물자산" 제외)
+            if s in ("자산", "총자산", "자산액") or ("자산" in s and "총" in s):
                 target_items[item] = "가구_자산평균"
-            elif ("부채" in s and "총" in s) or s == "부채액":
+            # 부채: "부채", "총부채", "부채액" (단, 하위항목 "금융부채" 등 제외)
+            elif s in ("부채", "총부채", "부채액") or ("부채" in s and "총" in s):
                 target_items[item] = "가구_부채평균"
-            elif ("소득" in s and ("경상" in s or "총" in s)) or s == "소득":
+            # 소득: "경상소득(전년도)", "소득", "총소득"
+            elif s in ("소득", "총소득") or ("소득" in s and ("경상" in s or "총" in s)):
                 target_items[item] = "가구_소득평균"
 
         if not target_items:
