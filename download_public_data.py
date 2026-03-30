@@ -404,7 +404,7 @@ def fetch_population_migration(start_year=2010, end_year=2026):
     return _fetch_migration_from_kosis(start_year, end_year)
 
 
-def _fetch_migration_from_kosis(start_year=2010, end_year=2025):
+def _fetch_migration_from_kosis(start_year=2010, end_year=2026):
     """대체: data.go.kr 인구이동통계 API"""
     print("  data.go.kr 인구이동 API로 대체 시도...")
 
