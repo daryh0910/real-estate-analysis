@@ -789,6 +789,29 @@ def load_price_index_data():
     return pd.read_csv(PRICE_INDEX_PATH)
 
 
+def load_csi_data():
+    """
+    소비자심리지수(CSI) 로드 (전국, 월별)
+    Returns: DataFrame [연월, 소비자심리지수, 주택가격전망CSI, 연도, 월]
+    """
+    if not os.path.exists(CSI_PATH):
+        return pd.DataFrame()
+    return pd.read_csv(CSI_PATH)
+
+
+def load_policy_events():
+    """
+    정책 이벤트 DB 로드
+    Returns: DataFrame [날짜, 카테고리, 이벤트명, 방향, 영향지역, 상세]
+    """
+    if not os.path.exists(POLICY_EVENTS_PATH):
+        return pd.DataFrame()
+    df = pd.read_csv(POLICY_EVENTS_PATH)
+    if "날짜" in df.columns:
+        df["날짜"] = pd.to_datetime(df["날짜"])
+    return df
+
+
 def _agg_nps_sido(nps_df, freq="yearly"):
     """국민연금 데이터를 시도 레벨로 집계 (yearly 또는 monthly)"""
     if nps_df.empty or "시도" not in nps_df.columns:
