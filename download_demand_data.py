@@ -665,13 +665,23 @@ def fetch_kosis_household_asset(start_year=2012, end_year=2024):
             df_filtered["지표명"] = df_filtered[item_name_col].map(target_items)
 
             # 가구특성 차원이 있으면 '전체가구'만 필터
+            # (항목 컬럼과 지역 컬럼은 제외)
             for dim in ["C1_NM", "C2_NM", "C3_NM"]:
-                if dim in df_filtered.columns and dim != region_name_col:
+                if (dim in df_filtered.columns
+                        and dim != region_name_col
+                        and dim != item_name_col):
                     vals = df_filtered[dim].unique()
                     total_vals = [v for v in vals if "전체" in str(v) or "계" == str(v)]
                     if total_vals:
                         df_filtered = df_filtered[df_filtered[dim].isin(total_vals)]
                         break
+
+            # ITM_NM이 항목 컬럼이 아닌 경우, "전가구 평균"만 필터
+            if "ITM_NM" in df_filtered.columns and item_name_col != "ITM_NM":
+                itm_vals = df_filtered["ITM_NM"].unique()
+                avg_vals = [v for v in itm_vals if "평균" in str(v)]
+                if avg_vals:
+                    df_filtered = df_filtered[df_filtered["ITM_NM"].isin(avg_vals)]
 
             pivot = df_filtered.pivot_table(
                 index=["연도", "시도"],
