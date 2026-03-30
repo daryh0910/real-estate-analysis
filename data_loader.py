@@ -879,7 +879,8 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
               nts_df=None,
               unsold_df=None, land_price_df=None, pop_migration_df=None,
               migration_df=None, rate_df=None,
-              jeonwolse_df=None, price_index_df=None):
+              jeonwolse_df=None, price_index_df=None,
+              csi_df=None):
     """
     전체 데이터 병합 (시도 레벨)
     freq: 'yearly' → 연도+시도 기준 병합, 'monthly' → 연월+시도 기준 병합
