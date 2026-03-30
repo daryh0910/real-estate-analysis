@@ -1368,6 +1368,9 @@ def main():
             args.kosis_start, args.kosis_end
         )
 
+    if run_all or args.kb:
+        results["kb"] = fetch_kb_market_data()
+
     print("\n" + "=" * 60)
     print("완료 요약:")
     for key, val in results.items():
