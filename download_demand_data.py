@@ -584,7 +584,22 @@ def fetch_kosis_household_asset(start_year=2012, end_year=2024):
         return None
 
     # 항목명 컬럼 찾기
-    item_name_col = "ITM_NM" if "ITM_NM" in df.columns else None
+    # DT_1HDAAA01: C3_NM이 자산/부채/소득 분류, ITM_NM은 "전가구 평균" 등
+    # → C3_NM에 자산/부채/소득 키워드가 있으면 C3_NM을 항목 컬럼으로 사용
+    item_name_col = None
+    if "C3_NM" in df.columns:
+        c3_sample = set(df["C3_NM"].dropna().unique())
+        if any("자산" in str(v) or "부채" in str(v) or "소득" in str(v) for v in c3_sample):
+            item_name_col = "C3_NM"
+    if item_name_col is None and "ITM_NM" in df.columns:
+        itm_sample = set(df["ITM_NM"].dropna().unique())
+        if any("자산" in str(v) or "부채" in str(v) or "소득" in str(v) for v in itm_sample):
+            item_name_col = "ITM_NM"
+    # fallback: C3_NM이 있으면 사용
+    if item_name_col is None and "C3_NM" in df.columns:
+        item_name_col = "C3_NM"
+    elif item_name_col is None:
+        item_name_col = "ITM_NM" if "ITM_NM" in df.columns else None
 
     # 데이터 값 숫자 변환
     df["값"] = pd.to_numeric(
