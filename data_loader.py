@@ -1119,6 +1119,17 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
                     csi_df[["연도", "월"] + csi_cols], on=["연도", "월"], how="left"
                 )
 
+    # KB부동산 수급 데이터 병합 (시도, 월별)
+    if kb_df is not None and not kb_df.empty:
+        kb_cols = [c for c in kb_df.columns if c.startswith("KB_")]
+        if kb_cols:
+            if freq == "yearly":
+                kb_yearly = kb_df[kb_df["월"] == 12][["시도", "연도"] + kb_cols].copy()
+                merged = merged.merge(kb_yearly, on=["시도", "연도"], how="left")
+            else:
+                kb_merge = kb_df[["시도", "연도", "월"] + kb_cols].copy()
+                merged = merged.merge(kb_merge, on=["시도", "연도", "월"], how="left")
+
     # ── 파생지표 계산 ────────────────────────────────────────────
     _safe = lambda col: merged[col].replace(0, np.nan)
 
