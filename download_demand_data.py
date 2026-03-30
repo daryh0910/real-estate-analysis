@@ -1341,7 +1341,7 @@ def main():
     args = parser.parse_args()
 
     run_all = not (args.nps or args.bok or args.kosis or args.nts
-                    or args.quintile)
+                    or args.quintile or args.kb)
 
     print(f"\n데이터 출력 디렉토리: {OUTPUT_DIR}\n")
 
