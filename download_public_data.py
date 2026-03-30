@@ -1459,7 +1459,7 @@ def fetch_csi(start_ym="200809", end_ym="202612"):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="공공데이터 API 수집: 미분양, 인구이동, 금리, 전월세전환율, 가격지수, 주택건설실적, 지가변동률"
+        description="공공데이터 API 수집: 미분양, 인구이동, 금리, 전월세전환율, 가격지수, 주택건설실적, 지가변동률, CSI"
     )
     parser.add_argument("--unsold", action="store_true", help="미분양주택만")
     parser.add_argument("--migration", action="store_true", help="인구이동만")
@@ -1468,11 +1468,13 @@ def main():
     parser.add_argument("--price-index", action="store_true", help="주택가격지수만")
     parser.add_argument("--land-price", action="store_true", help="지가변동률만")
     parser.add_argument("--construction", action="store_true", help="주택건설실적(착공/준공)만")
+    parser.add_argument("--csi", action="store_true", help="소비자심리지수(CSI)만")
     args = parser.parse_args()
 
     run_all = not (args.unsold or args.migration or args.rate
                    or args.jeonwolse or args.price_index
-                   or args.land_price or args.construction)
+                   or args.land_price or args.construction
+                   or args.csi)
 
     print(f"\n데이터 출력 디렉토리: {OUTPUT_DIR}\n")
 
