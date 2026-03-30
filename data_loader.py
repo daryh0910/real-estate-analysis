@@ -57,6 +57,8 @@ POP_MIGRATION_PATH = os.path.join(DEMAND_DIR, "population_migration_sido_monthly
 BASE_RATE_PATH = os.path.join(DEMAND_DIR, "base_rate_monthly.csv")
 JEONWOLSE_RATE_PATH = os.path.join(DEMAND_DIR, "jeonwolse_conversion_rate_sido_monthly.csv")
 PRICE_INDEX_PATH = os.path.join(DEMAND_DIR, "housing_price_index_sido_monthly.csv")
+CSI_PATH = os.path.join(DEMAND_DIR, "csi_monthly.csv")
+POLICY_EVENTS_PATH = os.path.join(_PROJECT_ROOT, "data", "policy_events.csv")
 
 # 캐시 경로
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
