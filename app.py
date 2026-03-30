@@ -522,6 +522,23 @@ with sub_ts:
             fig_dual.update_yaxes(title_text=left_var, secondary_y=False)
             fig_dual.update_yaxes(title_text=right_var, secondary_y=True)
 
+            # 정책 이벤트 수직선 오버레이
+            show_policy = st.checkbox("정책 이벤트 표시", value=False, key="policy_dual")
+            if show_policy and not policy_events_df.empty:
+                colors = {"규제강화": "red", "규제완화": "green", "중립": "gray"}
+                for _, ev in policy_events_df.iterrows():
+                    x_val = ev["날짜"]
+                    if time_col == "연도":
+                        x_val = ev["날짜"].year
+                    fig_dual.add_vline(
+                        x=x_val, line_width=1, line_dash="dot",
+                        line_color=colors.get(ev.get("방향", ""), "gray"),
+                        annotation_text=ev.get("이벤트명", ""),
+                        annotation_position="top",
+                        annotation_font_size=8,
+                        annotation_textangle=-45,
+                    )
+
             st.plotly_chart(fig_dual, use_container_width=True)
 
             # 상관계수 표시
