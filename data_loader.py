@@ -1112,6 +1112,7 @@ def load_all_data(force_rebuild=False):
     merge_kwargs = dict(
         jeonse_df=jeonse_df, wolse_df=wolse_df, rent_all_df=rent_all_df,
         nps_df=nps_df, loan_df=loan_df, asset_df=asset_df,
+        nts_df=nts_df,
         unsold_df=unsold_df, land_price_df=land_price_df,
         pop_migration_df=pop_migration_df, rate_df=rate_df,
         jeonwolse_df=jeonwolse_df, price_index_df=price_index_df,
