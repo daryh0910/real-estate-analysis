@@ -49,6 +49,9 @@ real_estate_analysis/
 | ✅ | 미분양, 금리, 전월세전환율, 주택가격지수, 지가변동률 | BOK ECOS API |
 | ✅ | 국세청 근로소득 (시군구별, 2016~) | KOSIS API (orgId=133) |
 | ✅ | 소득5분위별 가계자산/부채/소득 | KOSIS API (DT_1HDAAA10) |
+| ✅ | KB 매수우위지수/매매거래/전세수급 | KB부동산 (PublicDataReader) |
+| ✅ | 소비자심리지수(CSI) | BOK ECOS API |
+| ✅ | 정책 이벤트 DB (64건) | 수작업 CSV |
 | 🔧 | 인구이동(전입/전출) | 수집함수 작성완료 |
 | 🔧 | 착공/준공 실적 | 수집함수 작성완료 |
 
