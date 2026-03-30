@@ -1206,6 +1206,8 @@ def load_all_data(force_rebuild=False):
         price_index_df = load_price_index_data()
     with st.spinner("소비자심리지수 데이터 로딩 중..."):
         csi_df = load_csi_data()
+    with st.spinner("KB부동산 수급 데이터 로딩 중..."):
+        kb_df = load_kb_market_data()
 
     merge_kwargs = dict(
         jeonse_df=jeonse_df, wolse_df=wolse_df, rent_all_df=rent_all_df,
