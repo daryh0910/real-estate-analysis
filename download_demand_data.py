@@ -1242,6 +1242,11 @@ def main():
             args.nts_start, args.nts_end
         )
 
+    if run_all or args.quintile:
+        results["quintile"] = fetch_kosis_household_asset_quintile(
+            args.kosis_start, args.kosis_end
+        )
+
     print("\n" + "=" * 60)
     print("완료 요약:")
     for key, val in results.items():
