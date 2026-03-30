@@ -20,6 +20,7 @@ real_estate_analysis/
 ├── download_public_data.py   # 공공데이터 API 수집 (BOK ECOS 7종)
 ├── download_demand_data.py   # 수요 데이터 수집 (NPS/BOK/KOSIS)
 ├── update_data.py            # 실거래 데이터 업데이트
+├── update_all.py             # 통합 업데이트 (4개 스크립트 순차 실행, 증분 지원)
 ├── build_cache.py            # Parquet 캐시 빌더
 ├── requirements.txt          # Python 의존성
 ├── .env.example              # 환경변수 템플릿
