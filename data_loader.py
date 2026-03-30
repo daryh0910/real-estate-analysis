@@ -790,6 +790,19 @@ def load_price_index_data():
     return pd.read_csv(PRICE_INDEX_PATH)
 
 
+def load_kb_market_data():
+    """
+    KB부동산 수급 데이터 로드 (시도, 월별)
+    Returns: DataFrame [시도, 연월, KB_매수우위지수, KB_매매거래지수, KB_전세수급지수, 연도, 월]
+    """
+    if not os.path.exists(KB_MARKET_PATH):
+        return pd.DataFrame()
+    df = pd.read_csv(KB_MARKET_PATH)
+    if "시도" in df.columns:
+        df["시도"] = df["시도"].apply(_normalize_sido)
+    return df
+
+
 def load_csi_data():
     """
     소비자심리지수(CSI) 로드 (전국, 월별)
