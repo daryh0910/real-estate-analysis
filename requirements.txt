@@ -8,3 +8,4 @@ pyarrow
 scikit-learn
 requests
 python-dotenv
+PublicDataReader
