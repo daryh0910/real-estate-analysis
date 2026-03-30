@@ -678,6 +678,19 @@ def load_household_asset_data():
     return df
 
 
+def load_household_asset_quintile_data():
+    """
+    KOSIS 소득5분위별 가계자산 데이터 로드 (전국, 연간)
+    Returns: DataFrame [연도, 소득분위, 가구_자산평균, 가구_부채평균, 가구_순자산,
+                        가구_소득평균, 가구_금융자산, 가구_실물자산, ...]
+    """
+    if not os.path.exists(KOSIS_QUINTILE_PATH):
+        return pd.DataFrame()
+
+    df = pd.read_csv(KOSIS_QUINTILE_PATH)
+    return df
+
+
 def load_unsold_housing_data():
     """
     미분양주택현황 로드 (시도, 월별)
