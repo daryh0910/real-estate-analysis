@@ -1179,6 +1179,8 @@ def load_all_data(force_rebuild=False):
         jeonwolse_df = load_jeonwolse_rate_data()
     with st.spinner("주택가격지수 데이터 로딩 중..."):
         price_index_df = load_price_index_data()
+    with st.spinner("소비자심리지수 데이터 로딩 중..."):
+        csi_df = load_csi_data()
 
     merge_kwargs = dict(
         jeonse_df=jeonse_df, wolse_df=wolse_df, rent_all_df=rent_all_df,
