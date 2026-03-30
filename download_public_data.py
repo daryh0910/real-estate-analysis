@@ -1353,6 +1353,105 @@ def _fetch_construction_from_datagokr(start_ym, end_ym):
 
 
 # ═══════════════════════════════════════════════════════
+# 8. 소비자심리지수(CSI) (BOK ECOS API)
+# ═══════════════════════════════════════════════════════
+
+def fetch_csi(start_ym="200809", end_ym="202612"):
+    """
+    BOK ECOS API → 소비자심리지수(CCSI) + 주택가격전망CSI
+    통계표: 511Y002 (소비자동향조사, 전국, 월, 2008.9~)
+    항목코드:
+        - FME   : 소비자심리지수 (CCSI, Composite Consumer Sentiment Index)
+        - FMFB  : 주택가격전망CSI
+    분류코드: 99988 (전체)
+    출력: {OUTPUT_DIR}/csi_monthly.csv
+    """
+    print("=" * 60)
+    print("[8] 소비자심리지수(CSI) 수집 (BOK)")
+    print("=" * 60)
+
+    # 수집 대상: (항목코드, 컬럼명)
+    csi_items = [
+        ("FME",  "소비자심리지수"),      # CCSI
+        ("FMFB", "주택가격전망CSI"),     # 주택가격전망 CSI
+    ]
+
+    all_rows = []
+    for item_code, label in csi_items:
+        # 511Y002: 소비자동향조사(전국, 월, 2008.9~)
+        # Group2(CSI분류코드): 99988 = 전체
+        url = (
+            f"{BOK_BASE_URL}/StatisticSearch/{BOK_API_KEY}/json/kr/"
+            f"1/99999/511Y002/M/{start_ym}/{end_ym}/{item_code}/99988/"
+        )
+        print(f"  요청: {label} (511Y002/{item_code}/99988)")
+
+        try:
+            resp = _api_get(url)
+            data = resp.json()
+        except Exception as e:
+            print(f"  API 요청 실패: {e}")
+            continue
+
+        if "StatisticSearch" not in data:
+            err_msg = data.get("RESULT", {}).get("MESSAGE", "알 수 없는 오류")
+            print(f"  API 오류: {err_msg}")
+            continue
+
+        rows = data["StatisticSearch"]["row"]
+        print(f"    {len(rows)}행 수신")
+
+        for row in rows:
+            time_str = row.get("TIME", "")
+            value_str = row.get("DATA_VALUE", "")
+
+            if len(time_str) < 6:
+                continue
+
+            ym = f"{time_str[:4]}-{time_str[4:6]}"
+
+            try:
+                val = float(value_str.replace(",", ""))
+            except (ValueError, AttributeError):
+                continue
+
+            all_rows.append({
+                "연월": ym,
+                "지표": label,
+                "값": val,
+            })
+
+    if not all_rows:
+        print("  데이터 없음")
+        return None
+
+    df = pd.DataFrame(all_rows)
+
+    # 피벗: 지표별 → 컬럼으로
+    pivot = df.pivot_table(
+        index="연월",
+        columns="지표",
+        values="값",
+        aggfunc="first",
+    ).reset_index()
+    pivot.columns.name = None
+
+    pivot["연도"] = pivot["연월"].str[:4].astype(int)
+    pivot["월"] = pivot["연월"].str[5:7].astype(int)
+    pivot = pivot.sort_values("연월").reset_index(drop=True)
+
+    # 저장
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, "csi_monthly.csv")
+    pivot.to_csv(out_path, index=False, encoding="utf-8-sig")
+    print(f"  저장: {out_path}")
+    print(f"    행 수: {len(pivot):,}, 기간: {pivot['연월'].min()} ~ {pivot['연월'].max()}")
+    print(f"    컬럼: {[c for c in pivot.columns if c not in ['연월', '연도', '월']]}")
+
+    return pivot
+
+
+# ═══════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════
 
