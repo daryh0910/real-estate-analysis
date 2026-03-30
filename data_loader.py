@@ -1094,6 +1094,8 @@ def load_all_data(force_rebuild=False):
         loan_df = load_housing_loan_data()
     with st.spinner("가계자산 데이터 로딩 중..."):
         asset_df = load_household_asset_data()
+    with st.spinner("국세청 근로소득 데이터 로딩 중..."):
+        nts_df = load_nts_income_data()
     with st.spinner("미분양 데이터 로딩 중..."):
         unsold_df = load_unsold_housing_data()
     with st.spinner("지가변동률 데이터 로딩 중..."):
