@@ -851,6 +851,7 @@ def _agg_rent_sido(rent_df, freq="yearly"):
 def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
               jeonse_df=None, wolse_df=None, rent_all_df=None,
               nps_df=None, loan_df=None, asset_df=None,
+              nts_df=None,
               unsold_df=None, land_price_df=None, pop_migration_df=None,
               migration_df=None, rate_df=None,
               jeonwolse_df=None, price_index_df=None):
