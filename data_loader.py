@@ -58,6 +58,7 @@ BASE_RATE_PATH = os.path.join(DEMAND_DIR, "base_rate_monthly.csv")
 JEONWOLSE_RATE_PATH = os.path.join(DEMAND_DIR, "jeonwolse_conversion_rate_sido_monthly.csv")
 PRICE_INDEX_PATH = os.path.join(DEMAND_DIR, "housing_price_index_sido_monthly.csv")
 CSI_PATH = os.path.join(DEMAND_DIR, "csi_monthly.csv")
+KB_MARKET_PATH = os.path.join(DEMAND_DIR, "kb_market_supply_demand_monthly.csv")
 POLICY_EVENTS_PATH = os.path.join(_PROJECT_ROOT, "data", "policy_events.csv")
 
 # 캐시 경로
