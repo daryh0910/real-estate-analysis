@@ -1318,6 +1318,8 @@ def main():
     parser.add_argument("--nts", action="store_true", help="국세청 근로소득만")
     parser.add_argument("--quintile", action="store_true",
                         help="KOSIS 소득5분위별 가계자산만")
+    parser.add_argument("--kb", action="store_true",
+                        help="KB부동산 수급 데이터만")
     parser.add_argument(
         "--bok-start", default="200612", help="BOK 조회 시작월 (기본: 200612)"
     )
