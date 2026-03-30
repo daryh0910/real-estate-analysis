@@ -692,6 +692,314 @@ def fetch_kosis_household_asset(start_year=2012, end_year=2024):
 
 
 # ═══════════════════════════════════════════════════════
+# 4. 국세청 근로소득 시군구별 (KOSIS)
+# ═══════════════════════════════════════════════════════
+
+# KOSIS 국세청 통계표: 시·군·구별 근로소득 연말정산 신고현황 [2016~]
+NTS_ORG_ID = "133"
+NTS_TBL_ID = "DT_133001N_4215"
+
+# KOSIS C1 코드(시도) → 표준 시도명 매핑
+_NTS_SIDO_MAP = {
+    "A00": "전국", "A01": "서울", "A02": "인천", "A03": "경기",
+    "A04": "강원", "A05": "대전", "A06": "충북", "A07": "충남",
+    "A08": "세종", "A09": "광주", "A10": "전북", "A11": "전남",
+    "A12": "대구", "A13": "경북", "A14": "부산", "A15": "울산",
+    "A16": "경남", "A17": "제주", "A18": "기타",
+}
+
+
+def _kosis_api_via_powershell(params, timeout=120):
+    """
+    WSL에서 KOSIS 접속 불가 시 PowerShell을 통해 API 호출.
+    requests 실패 시 폴백으로 사용.
+    """
+    # URL 파라미터 조합
+    query_parts = [f"{k}={v}" for k, v in params.items()]
+    url = KOSIS_API_URL + "?" + "&".join(query_parts)
+
+    ps_script = (
+        f"$r = Invoke-RestMethod -Uri '{url}' -TimeoutSec {timeout}; "
+        f"$r | ConvertTo-Json -Depth 5 -Compress"
+    )
+
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-Command", ps_script],
+            capture_output=True, text=True, timeout=timeout + 30,
+            encoding="utf-8", errors="replace",
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"PowerShell 오류: {result.stderr[:500]}")
+
+        raw = result.stdout.strip()
+        # BOM 제거
+        if raw.startswith("\ufeff"):
+            raw = raw[1:]
+        data = json.loads(raw)
+        return data
+
+    except subprocess.TimeoutExpired:
+        raise TimeoutError("PowerShell 호출 타임아웃")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"JSON 파싱 실패: {e}")
+
+
+def _kosis_api_get(params, retries=2):
+    """
+    KOSIS API 호출 — requests 시도 후 실패 시 PowerShell 폴백.
+    """
+    # 1차: requests 직접 호출
+    try:
+        resp = _api_get(KOSIS_API_URL, params=params, retries=retries)
+        data = resp.json()
+        if isinstance(data, list) and len(data) > 0:
+            return data
+        if isinstance(data, dict) and "err" not in data:
+            return data
+        # 에러 응답이면 PowerShell 폴백
+        err = data.get("err", "") if isinstance(data, dict) else ""
+        print(f"    requests 응답 오류 (err={err}), PowerShell 폴백 시도")
+    except Exception as e:
+        print(f"    requests 실패 ({e}), PowerShell 폴백 시도")
+
+    # 2차: PowerShell 폴백
+    return _kosis_api_via_powershell(params)
+
+
+def fetch_nts_income_data(start_year=2016, end_year=2024):
+    """
+    KOSIS API → 국세청 시·군·구별 근로소득 연말정산 신고현황
+    통계표 ID: DT_133001N_4215 (orgId=133)
+
+    차원 구조:
+        C1 = 행정구역(시군구)별 — A00(전국), A01(서울), A0101(강남구) ...
+        C2 = 신고현황별 — B01(급여총계), B02(과세대상근로소득/총급여),
+                          B03(과세표준), B04(결정세액)
+        ITM = T001(인원/명), T002(금액/백만원)
+
+    출력: {OUTPUT_DIR}/nts_income_sigungu_yearly.csv
+    컬럼: [지역코드, 시도, 시군구, 연도, 급여총계_인원, 급여총계_금액,
+           총급여_인원, 총급여_금액, 과세표준_인원, 과세표준_금액,
+           결정세액_인원, 결정세액_금액, 1인당총급여]
+    """
+    print("=" * 60)
+    print("[4/4] 국세청 근로소득 시군구별 수집 (KOSIS)")
+    print("=" * 60)
+
+    api_key = _get_kosis_key()
+    print(f"  API Key: {api_key[:8]}...")
+
+    # KOSIS 40,000셀 제한 확인
+    # 1년당: 247(지역) x 4(항목) x 2(인원/금액) = 1,976행
+    # 최대 약 20년 가능 → 분할 불필요
+    year_span = end_year - start_year + 1
+    est_rows = 247 * 4 * 2 * year_span
+    print(f"  조회 기간: {start_year}~{end_year} ({year_span}년)")
+    print(f"  예상 행 수: {est_rows:,} (40,000셀 제한)")
+
+    # 40,000셀 초과 시 분할 요청
+    if est_rows > 38000:
+        print("  40,000셀 제한 초과 우려 → 기간 분할 요청")
+        all_data = []
+        # 약 19년씩 분할
+        chunk_years = max(1, 38000 // (247 * 4 * 2))
+        for yr_start in range(start_year, end_year + 1, chunk_years):
+            yr_end = min(yr_start + chunk_years - 1, end_year)
+            print(f"    분할 요청: {yr_start}~{yr_end}")
+
+            params = {
+                "method": "getList",
+                "apiKey": api_key,
+                "itmId": "ALL",
+                "objL1": "ALL",
+                "objL2": "ALL",
+                "prdSe": "Y",
+                "startPrdDe": str(yr_start),
+                "endPrdDe": str(yr_end),
+                "orgId": NTS_ORG_ID,
+                "tblId": NTS_TBL_ID,
+                "format": "json",
+                "jsonVD": "Y",
+            }
+
+            try:
+                chunk = _kosis_api_get(params)
+                if isinstance(chunk, list):
+                    all_data.extend(chunk)
+                    print(f"      {len(chunk)} 행 수신")
+                else:
+                    err = chunk.get("err", "") if isinstance(chunk, dict) else ""
+                    print(f"      오류 (err={err})")
+            except Exception as e:
+                print(f"      요청 실패: {e}")
+
+            time.sleep(1)  # API 부하 방지
+
+        raw_data = all_data if all_data else None
+    else:
+        params = {
+            "method": "getList",
+            "apiKey": api_key,
+            "itmId": "ALL",
+            "objL1": "ALL",
+            "objL2": "ALL",
+            "prdSe": "Y",
+            "startPrdDe": str(start_year),
+            "endPrdDe": str(end_year),
+            "orgId": NTS_ORG_ID,
+            "tblId": NTS_TBL_ID,
+            "format": "json",
+            "jsonVD": "Y",
+        }
+
+        try:
+            raw_data = _kosis_api_get(params)
+            if isinstance(raw_data, list):
+                print(f"  {len(raw_data)} 행 수신")
+            elif isinstance(raw_data, dict):
+                err = raw_data.get("err", raw_data.get("errMsg", ""))
+                print(f"  API 오류: {err}")
+                raw_data = None
+            else:
+                print(f"  빈 응답")
+                raw_data = None
+        except Exception as e:
+            print(f"  API 요청 실패: {e}")
+            raw_data = None
+
+    if not raw_data:
+        print("  데이터 수신 실패")
+        return None
+
+    # DataFrame 변환
+    df = pd.DataFrame(raw_data)
+
+    # 원본 JSON 백업 (샘플)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    backup = os.path.join(OUTPUT_DIR, "nts_income_raw_sample.json")
+    with open(backup, "w", encoding="utf-8") as f:
+        json.dump(raw_data[:50], f, ensure_ascii=False, indent=2)
+    print(f"  원본 샘플 백업: {backup}")
+
+    # 필수 컬럼 확인
+    required = ["C1", "C1_NM", "C2", "C2_NM", "ITM_ID", "ITM_NM", "DT", "PRD_DE"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        print(f"  필수 컬럼 누락: {missing}")
+        print(f"  사용 가능: {list(df.columns)}")
+        return None
+
+    # 값 숫자 변환
+    df["값"] = pd.to_numeric(
+        df["DT"].astype(str).str.replace(",", ""), errors="coerce"
+    )
+    df["연도"] = pd.to_numeric(df["PRD_DE"], errors="coerce").astype("Int64")
+
+    # 항목 확인
+    c2_items = df[["C2", "C2_NM"]].drop_duplicates().sort_values("C2")
+    print(f"  C2 항목: {dict(zip(c2_items['C2'], c2_items['C2_NM']))}")
+
+    itm_items = df[["ITM_ID", "ITM_NM"]].drop_duplicates().sort_values("ITM_ID")
+    print(f"  ITM 항목: {dict(zip(itm_items['ITM_ID'], itm_items['ITM_NM']))}")
+
+    # 피벗: C2(신고현황) x ITM(인원/금액) 조합을 컬럼으로
+    # 레이블 생성: "급여총계_인원", "급여총계_금액" 등
+    c2_label_map = {
+        "B01": "급여총계",
+        "B02": "총급여",
+        "B03": "과세표준",
+        "B04": "결정세액",
+    }
+    itm_label_map = {
+        "T001": "인원",
+        "T002": "금액",
+    }
+
+    df["지표명"] = (
+        df["C2"].map(c2_label_map).fillna(df["C2_NM"]) + "_" +
+        df["ITM_ID"].map(itm_label_map).fillna(df["ITM_NM"])
+    )
+
+    # 피벗 (지역 x 연도 → 지표)
+    pivot = df.pivot_table(
+        index=["C1", "C1_NM", "연도"],
+        columns="지표명",
+        values="값",
+        aggfunc="first",
+    ).reset_index()
+    pivot.columns.name = None
+
+    # 지역 코드 → 시도 매핑
+    pivot["지역코드"] = pivot["C1"]
+    pivot["시군구"] = pivot["C1_NM"]
+
+    # 시도 결정: C1 코드 앞 3자리로 시도 매핑
+    pivot["시도코드"] = pivot["C1"].str[:3]
+    pivot["시도"] = pivot["시도코드"].map(_NTS_SIDO_MAP)
+
+    # 시도 레벨 행은 시군구를 비워둠 (또는 시도명 그대로)
+    # C1 길이가 3이면 시도 레벨, 그 이상이면 시군구
+    is_sido_level = pivot["C1"].str.len() <= 3
+    pivot.loc[is_sido_level, "시군구"] = pivot.loc[is_sido_level, "시도"]
+
+    # 전국/기타 제외 (선택사항: 일단 포함하되 구분)
+    pivot["레벨"] = np.where(
+        pivot["C1"] == "A00", "전국",
+        np.where(is_sido_level, "시도", "시군구")
+    )
+
+    # 1인당 총급여 계산 (총급여_금액 / 총급여_인원)
+    if "총급여_금액" in pivot.columns and "총급여_인원" in pivot.columns:
+        pivot["1인당총급여_백만원"] = np.where(
+            pivot["총급여_인원"] > 0,
+            pivot["총급여_금액"] / pivot["총급여_인원"],
+            np.nan,
+        )
+
+    # 1인당 결정세액 계산
+    if "결정세액_금액" in pivot.columns and "결정세액_인원" in pivot.columns:
+        pivot["1인당결정세액_백만원"] = np.where(
+            pivot["결정세액_인원"] > 0,
+            pivot["결정세액_금액"] / pivot["결정세액_인원"],
+            np.nan,
+        )
+
+    # 컬럼 정리 및 정렬
+    col_order = ["지역코드", "시도", "시군구", "레벨", "연도"]
+    metric_cols = [c for c in pivot.columns if c.endswith(("_인원", "_금액", "_백만원"))]
+    col_order += sorted(metric_cols)
+    # 존재하는 컬럼만 선택
+    col_order = [c for c in col_order if c in pivot.columns]
+    pivot = pivot[col_order].copy()
+
+    pivot = pivot.sort_values(["연도", "지역코드"]).reset_index(drop=True)
+
+    # 전국/기타 제외 버전 저장 (시군구 분석용)
+    pivot_sigungu = pivot[
+        (pivot["레벨"] == "시군구") & (pivot["시도"] != "기타")
+    ].copy()
+
+    # 저장: 시군구 레벨
+    out_path = os.path.join(OUTPUT_DIR, "nts_income_sigungu_yearly.csv")
+    pivot_sigungu.to_csv(out_path, index=False, encoding="utf-8-sig")
+    print(f"  저장 (시군구): {out_path}")
+    print(
+        f"    행 수: {len(pivot_sigungu):,}, "
+        f"시군구 수: {pivot_sigungu['시군구'].nunique()}, "
+        f"기간: {int(pivot_sigungu['연도'].min())} ~ {int(pivot_sigungu['연도'].max())}"
+    )
+
+    # 저장: 전체 (전국/시도/시군구 포함)
+    out_full = os.path.join(OUTPUT_DIR, "nts_income_full_yearly.csv")
+    pivot.to_csv(out_full, index=False, encoding="utf-8-sig")
+    print(f"  저장 (전체): {out_full}")
+    print(f"    행 수: {len(pivot):,}")
+
+    return pivot_sigungu
+
+
+# ═══════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════
 
