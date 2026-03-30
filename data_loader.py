@@ -1216,7 +1216,7 @@ def load_all_data(force_rebuild=False):
         unsold_df=unsold_df, land_price_df=land_price_df,
         pop_migration_df=pop_migration_df, rate_df=rate_df,
         jeonwolse_df=jeonwolse_df, price_index_df=price_index_df,
-        csi_df=csi_df,
+        csi_df=csi_df, kb_df=kb_df,
     )
 
     yearly = merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly", **merge_kwargs)
