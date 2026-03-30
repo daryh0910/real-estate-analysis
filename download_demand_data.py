@@ -721,6 +721,163 @@ def fetch_kosis_household_asset(start_year=2012, end_year=2024):
 
 
 # ═══════════════════════════════════════════════════════
+# 3-2. KOSIS 가계금융복지조사 — 소득5분위별
+# ═══════════════════════════════════════════════════════
+
+# 소득5분위별 자산 부채 소득 현황 (전국 기준, 분위별)
+KOSIS_QUINTILE_TBL = ("101", "DT_1HDAAA10", "소득5분위별 자산 부채 소득 현황")
+
+
+def fetch_kosis_household_asset_quintile(start_year=2012, end_year=2024):
+    """
+    KOSIS API → 소득5분위별 가계 자산/부채/소득 연간 데이터 (전국)
+    출력: {OUTPUT_DIR}/kosis_household_asset_quintile_yearly.csv
+
+    테이블: DT_1HDAAA10
+    차원 구조:
+      C1 = 부채보유 여부별 (전체, 부채보유, 미보유)
+      C2 = 소득5분위별 (전체, 1~5분위)
+      C3 = 자산/부채/소득 분류별
+      ITM = 전가구 평균, 보유가구 중앙값, 보유가구 비율
+    """
+    print("=" * 60)
+    print("[3-2] KOSIS 가계금융복지조사 — 소득5분위별 수집")
+    print("=" * 60)
+
+    api_key = _get_kosis_key()
+    org_id, tbl_id, desc = KOSIS_QUINTILE_TBL
+    print(f"  테이블: {desc} (orgId={org_id}, tblId={tbl_id})")
+
+    params = {
+        "method": "getList",
+        "apiKey": api_key,
+        "itmId": "ALL",
+        "objL1": "ALL",
+        "objL2": "ALL",
+        "objL3": "ALL",
+        "prdSe": "Y",
+        "startPrdDe": str(start_year),
+        "endPrdDe": str(end_year),
+        "orgId": org_id,
+        "tblId": tbl_id,
+        "format": "json",
+        "jsonVD": "Y",
+    }
+
+    # WSL → KOSIS 접속 불가 시 PowerShell 폴백
+    raw_data = None
+    try:
+        resp = _api_get(KOSIS_API_URL, params=params)
+        data = resp.json()
+        if isinstance(data, list) and len(data) > 0:
+            raw_data = data
+    except Exception as e:
+        print(f"  requests 실패, PowerShell 폴백 시도: {e}")
+
+    if raw_data is None:
+        try:
+            raw_data = _kosis_api_via_powershell(params)
+        except Exception as e2:
+            print(f"  PowerShell 폴백도 실패: {e2}")
+            return None
+
+    if not isinstance(raw_data, list) or len(raw_data) == 0:
+        print("  데이터 없음")
+        return None
+
+    print(f"  {len(raw_data)} 행 수신")
+    df = pd.DataFrame(raw_data)
+
+    # 필수 컬럼 확인
+    for rc in ["PRD_DE", "DT", "C1_NM", "C2_NM", "C3_NM", "ITM_NM"]:
+        if rc not in df.columns:
+            print(f"  필수 컬럼 누락: {rc}")
+            return None
+
+    # 값 변환
+    df["값"] = pd.to_numeric(
+        df["DT"].astype(str).str.replace(",", ""), errors="coerce"
+    )
+    df["연도"] = pd.to_numeric(df["PRD_DE"], errors="coerce")
+
+    # 전체 가구만 필터 (C1_NM = "전체"), 전가구 평균만 (ITM_NM)
+    df = df[df["C1_NM"] == "전체"]
+    df = df[df["ITM_NM"].str.contains("평균", na=False)]
+
+    # 소득분위 매핑 (C2_NM)
+    df["소득분위"] = df["C2_NM"].str.strip()
+
+    # 관심 항목 매칭 (C3_NM)
+    target_items = {}
+    for item in df["C3_NM"].unique():
+        s = str(item).strip()
+        if s in ("자산", "총자산", "자산액"):
+            target_items[item] = "가구_자산평균"
+        elif s in ("부채", "총부채", "부채액"):
+            target_items[item] = "가구_부채평균"
+        elif s in ("소득", "총소득") or ("소득" in s and "경상" in s):
+            target_items[item] = "가구_소득평균"
+        elif "순자산" in s:
+            target_items[item] = "가구_순자산"
+        elif s in ("금융자산",):
+            target_items[item] = "가구_금융자산"
+        elif "실물자산" in s:
+            target_items[item] = "가구_실물자산"
+        elif s in ("금융부채",):
+            target_items[item] = "가구_금융부채"
+        elif "임대보증금" in s:
+            target_items[item] = "가구_임대보증금"
+
+    if not target_items:
+        print("  항목 매칭 실패")
+        print(f"  C3_NM 항목: {list(df['C3_NM'].unique())[:20]}")
+        return None
+
+    print(f"  매칭된 항목: {target_items}")
+
+    df_filtered = df[df["C3_NM"].isin(target_items.keys())].copy()
+    df_filtered["지표명"] = df_filtered["C3_NM"].map(target_items)
+
+    # 피벗
+    pivot = df_filtered.pivot_table(
+        index=["연도", "소득분위"],
+        columns="지표명",
+        values="값",
+        aggfunc="first",
+    ).reset_index()
+
+    pivot.columns.name = None
+
+    # 파생 지표
+    if "가구_자산평균" in pivot.columns and "가구_부채평균" in pivot.columns:
+        if "가구_순자산" not in pivot.columns:
+            pivot["가구_순자산"] = pivot["가구_자산평균"] - pivot["가구_부채평균"]
+    if "가구_부채평균" in pivot.columns and "가구_소득평균" in pivot.columns:
+        pivot["DSR"] = np.where(
+            pivot["가구_소득평균"] > 0,
+            pivot["가구_부채평균"] / pivot["가구_소득평균"] * 100,
+            np.nan,
+        )
+
+    pivot = pivot.sort_values(["연도", "소득분위"]).reset_index(drop=True)
+
+    # 저장
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(
+        OUTPUT_DIR, "kosis_household_asset_quintile_yearly.csv"
+    )
+    pivot.to_csv(out_path, index=False, encoding="utf-8-sig")
+    print(f"  저장: {out_path}")
+    print(
+        f"    행 수: {len(pivot):,}, "
+        f"분위 수: {pivot['소득분위'].nunique()}, "
+        f"기간: {int(pivot['연도'].min())} ~ {int(pivot['연도'].max())}"
+    )
+
+    return pivot
+
+
+# ═══════════════════════════════════════════════════════
 # 4. 국세청 근로소득 시군구별 (KOSIS)
 # ═══════════════════════════════════════════════════════
 
