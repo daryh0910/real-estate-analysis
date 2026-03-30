@@ -1214,6 +1214,8 @@ def load_all_data(force_rebuild=False):
         "rate": rate_df,
         "jeonwolse": jeonwolse_df,
         "price_index": price_index_df,
+        "csi": csi_df,
+        "policy_events": load_policy_events(),
         "yearly": yearly,
         "monthly": monthly,
     }
