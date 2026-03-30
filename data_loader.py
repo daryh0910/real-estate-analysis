@@ -692,6 +692,21 @@ def load_household_asset_quintile_data():
     return df
 
 
+def load_nts_income_data():
+    """
+    국세청 근로소득 데이터 로드 (시군구, 연간)
+    Returns: DataFrame [지역코드, 시도, 시군구, 연도, 총급여_인원, 총급여_금액,
+                        1인당총급여_백만원, 1인당결정세액_백만원, ...]
+    """
+    if not os.path.exists(NTS_INCOME_PATH):
+        return pd.DataFrame()
+
+    df = pd.read_csv(NTS_INCOME_PATH)
+    if "시도" in df.columns:
+        df["시도"] = df["시도"].apply(_normalize_sido)
+    return df
+
+
 def load_unsold_housing_data():
     """
     미분양주택현황 로드 (시도, 월별)
