@@ -47,6 +47,7 @@ DEMAND_DIR = os.path.join(BACKDATA, "수요/수요_집계") if BASE_ONEDRIVE els
 NPS_AGG_PATH = os.path.join(DEMAND_DIR, "nps_sigungu_monthly.csv")
 BOK_LOAN_PATH = os.path.join(DEMAND_DIR, "bok_housing_loan_sido_monthly.csv")
 KOSIS_ASSET_PATH = os.path.join(DEMAND_DIR, "kosis_household_asset_sido_yearly.csv")
+KOSIS_QUINTILE_PATH = os.path.join(DEMAND_DIR, "kosis_household_asset_quintile_yearly.csv")
 
 # 공공데이터 추가 수집 경로 (download_public_data.py 산출물)
 UNSOLD_PATH = os.path.join(DEMAND_DIR, "unsold_housing_sido_monthly.csv")
