@@ -319,7 +319,7 @@ def _build_decade_pivot(df_raw: pd.DataFrame, level: str = "sido") -> pd.DataFra
 # 저장
 # ═══════════════════════════════════════════════════════
 
-def save(df: pd.DataFrame, filename: str = "kosis_population_age_sido_yearly.csv"):
+def save(df: pd.DataFrame, filename: str):
     path = os.path.join(CACHE_DIR, filename)
     df.to_csv(path, index=False, encoding="utf-8-sig")
     print(f"  ✅ 저장: {path}  ({len(df)}행, {len(df.columns)}컬럼)")
