@@ -211,42 +211,55 @@ def fetch_all_sigungu(start_year: int = DEFAULT_START, end_year: int = DEFAULT_E
 # 파싱 및 집계
 # ═══════════════════════════════════════════════════════
 
-def _parse(raw: list) -> pd.DataFrame:
-    """원시 API 응답 → 분석용 DataFrame 변환"""
+def _parse(raw: list, level: str = "sido") -> pd.DataFrame:
+    """
+    원시 API 응답 → 분석용 DataFrame 변환
+    level: "sido" (시도) | "sigungu" (시군구)
+    """
     rows = []
     for r in raw:
-        sido_cd = r.get("C1", "")
-        age_cd  = str(r.get("C2", ""))
-        itm_id  = r.get("ITM_ID", "")
-        year    = int(r.get("PRD_DE", 0))
-        val     = _to_int(r.get("DT"))
+        region_cd = r.get("C1", "")
+        age_cd    = str(r.get("C2", ""))
+        itm_id    = r.get("ITM_ID", "")
+        year      = int(r.get("PRD_DE", 0))
+        val       = _to_int(r.get("DT"))
 
-        gender = {
-            "T2": "합계",
-            "T3": "남",
-            "T4": "여",
-        }.get(itm_id)
+        gender = {"T2": "합계", "T3": "남", "T4": "여"}.get(itm_id)
         if gender is None:
             continue
 
         age_label = AGE_CODE_TO_LABEL.get(age_cd, f"C2={age_cd}")
-        rows.append({
-            "시도코드": sido_cd,
-            "시도":     SIDO_NAME.get(sido_cd, sido_cd),
-            "연도":     year,
-            "연령코드": age_cd,
-            "연령대":   age_label,
-            "성별":     gender,
-            "인구":     val,
-        })
+
+        if level == "sigungu":
+            region_nm = SIGUNGU_NAME_MAP.get(region_cd, region_cd)
+            row = {
+                "시군구코드": region_cd,
+                "시군구":     region_nm,
+                "시도코드":   region_cd[:2],
+                "시도":       SIDO_NAME.get(region_cd[:2], region_cd[:2]),
+                "연도":       year,
+                "연령코드":   age_cd,
+                "연령대":     age_label,
+                "성별":       gender,
+                "인구":       val,
+            }
+        else:
+            row = {
+                "시도코드": region_cd,
+                "시도":     SIDO_NAME.get(region_cd, region_cd),
+                "연도":     year,
+                "연령코드": age_cd,
+                "연령대":   age_label,
+                "성별":     gender,
+                "인구":     val,
+            }
+        rows.append(row)
 
     df_raw = pd.DataFrame(rows)
     if df_raw.empty:
         return df_raw
 
-    # 10년 단위 집계 컬럼 추가 (성별 × 연령대)
-    df_pivot = _build_decade_pivot(df_raw)
-    return df_pivot
+    return _build_decade_pivot(df_raw, level=level)
 
 
 def _build_decade_pivot(df_raw: pd.DataFrame) -> pd.DataFrame:
