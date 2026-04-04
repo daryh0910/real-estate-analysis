@@ -917,12 +917,47 @@ with main_tab4:
 
                 ta_key = f"f5_ta_{i}"
 
-                # ① 변수 선택 → 수식에 삽입
+                # ① 변수 선택 (카테고리 → 변수 2단계 선택) → 수식에 삽입
                 col_sel, col_ins = st.columns([5, 1])
                 with col_sel:
-                    sel_var = st.selectbox(
-                        "변수 선택 후 [삽입] 클릭", numeric_cols_5, key=f"f5_selvar_{i}"
+                    # 1단계: 카테고리 선택
+                    cat_list = ["(전체)"] + sorted(VAR_META["카테고리"].unique().tolist())
+                    sel_cat = st.selectbox("카테고리", cat_list, key=f"cat_{i}")
+
+                    # 2단계: 카테고리 필터 후 변수 선택
+                    if sel_cat == "(전체)":
+                        filtered_meta = VAR_META[VAR_META["컬럼명"].isin(numeric_cols_5)]
+                    else:
+                        filtered_meta = VAR_META[
+                            (VAR_META["카테고리"] == sel_cat) &
+                            (VAR_META["컬럼명"].isin(numeric_cols_5))
+                        ]
+
+                    # 메타에 없는 컬럼은 표시명=컬럼명으로 fallback
+                    meta_col_set = set(VAR_META["컬럼명"].tolist())
+                    extra_cols = [c for c in numeric_cols_5 if c not in meta_col_set]
+                    if sel_cat == "(전체)" and extra_cols:
+                        extra_rows = pd.DataFrame([
+                            {"표시명": c, "컬럼명": c, "카테고리": "(기타)", "출처": "-"}
+                            for c in extra_cols
+                        ])
+                        filtered_meta = pd.concat([filtered_meta, extra_rows], ignore_index=True)
+
+                    disp_names = filtered_meta["표시명"].tolist() if not filtered_meta.empty else numeric_cols_5
+                    sel_disp = st.selectbox(
+                        "변수 선택 후 [삽입] 클릭",
+                        disp_names,
+                        key=f"f5_selvar_{i}",
                     )
+                    # 표시명 → 컬럼명 매핑
+                    _meta_match = filtered_meta[filtered_meta["표시명"] == sel_disp]
+                    sel_var = _meta_match["컬럼명"].iloc[0] if not _meta_match.empty else sel_disp
+
+                    # 선택 변수의 출처/카테고리 표시
+                    if not _meta_match.empty:
+                        _row = _meta_match.iloc[0]
+                        st.caption(f"출처: {_row.get('출처', '-')} | 카테고리: {_row.get('카테고리', '-')}")
+
                 with col_ins:
                     st.write("")
                     if st.button("삽입", key=f"f5_ins_{i}", use_container_width=True):
