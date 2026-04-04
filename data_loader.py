@@ -971,10 +971,12 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
               unsold_df=None, land_price_df=None, pop_migration_df=None,
               migration_df=None, rate_df=None,
               jeonwolse_df=None, price_index_df=None,
-              csi_df=None, kb_df=None):
+              csi_df=None, kb_df=None,
+              construction_df=None):
     """
     전체 데이터 병합 (시도 레벨)
     freq: 'yearly' → 연도+시도 기준 병합, 'monthly' → 연월+시도 기준 병합
+    construction_df: 착공/준공 파이프라인 데이터 (선택)
     """
     # apt_df를 시도 레벨로 집계
     if "시도" not in apt_df.columns:
