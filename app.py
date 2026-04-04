@@ -1324,9 +1324,7 @@ with sub_reg:
             st.info("독립변수를 1개 이상 선택하세요.")
 
 
-# ============================
-# Tab 5-2: 이상치 탐지 (통계분석 서브탭)
-# ============================
+# ── 이상치 탐지 서브탭 ──────────────────────────────────────────────
 with sub_outlier:
     st.header("이상치 탐지")
 
@@ -1371,10 +1369,86 @@ with sub_outlier:
             st.success("이상치가 탐지되지 않았습니다.")
 
 
+# ── 상관관계 분석 서브탭 (Tab 2에서 이동) ───────────────────────────
+with sub_corr:
+    st.header(f"상관관계 분석 ({mode_label})")
+
+    if analysis_df.empty:
+        st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
+    else:
+        # 실제 데이터에 존재하는 변수만 필터
+        valid_vars = [v for v in available_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
+
+        # 히트맵
+        st.subheader("상관계수 히트맵")
+        corr, pval = correlation_matrix(analysis_df, valid_vars)
+        if not corr.empty:
+            fig_heatmap = px.imshow(
+                corr, text_auto=".2f",
+                color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
+                title="변수 간 피어슨 상관계수",
+                labels={"color": "상관계수"},
+            )
+            fig_heatmap.update_layout(width=700, height=600)
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+
+            with st.expander("p-value 상세"):
+                st.dataframe(pval.style.format("{:.4f}"))
+        else:
+            st.info("상관계수를 계산할 데이터가 부족합니다.")
+
+        # 산점도
+        st.subheader("산점도 분석")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            default_x = valid_vars.index("GRDP") if "GRDP" in valid_vars else 0
+            x_var = st.selectbox("X축 변수", valid_vars, index=default_x, key="corr_x_var")
+        with col_b:
+            y_var = st.selectbox("Y축 변수", valid_vars, index=0, key="corr_y_var")
+
+        scatter_df, slope, intercept, r_sq = scatter_analysis(analysis_df, x_var, y_var)
+        if not scatter_df.empty:
+            fig_scatter = px.scatter(
+                scatter_df, x=x_var, y=y_var, color="시도",
+                title=f"{x_var} vs {y_var}",
+                trendline="ols" if len(scatter_df) >= 3 else None,
+            )
+            if r_sq is not None:
+                fig_scatter.add_annotation(
+                    text=f"R² = {r_sq:.4f}",
+                    xref="paper", yref="paper",
+                    x=0.02, y=0.98, showarrow=False, font=dict(size=14),
+                )
+            st.plotly_chart(fig_scatter, use_container_width=True)
+
+        # 시도별 상관계수
+        st.subheader("시도별 상관계수")
+        region_corr = correlation_by_region(yearly_df[yearly_df["연도"].between(*selected_years)], x_var, y_var)
+        if not region_corr.empty:
+            fig_bar = px.bar(
+                region_corr, x="시도", y="상관계수",
+                color="상관계수", color_continuous_scale="RdBu_r", range_color=[-1, 1],
+                title=f"시도별 {x_var}-{y_var} 상관계수",
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
+            st.dataframe(region_corr)
+
+        # 기간별 상관계수 추이
+        st.subheader("연도별 상관계수 추이")
+        period_corr = correlation_by_period(yearly_df, x_var, y_var)
+        if not period_corr.empty:
+            fig_period = px.line(
+                period_corr, x="연도", y="상관계수",
+                title=f"연도별 {x_var}-{y_var} 상관계수 추이", markers=True,
+            )
+            fig_period.add_hline(y=0, line_dash="dash", line_color="gray")
+            st.plotly_chart(fig_period, use_container_width=True)
+
+
 # ============================
-# Tab 6: 고급분석 (클러스터링 + Granger)
+# Tab 7: 고급분석 (클러스터링 + Granger)
 # ============================
-with main_tab6:
+with main_tab7:
     st.caption("**클러스터링**: 비슷한 특성의 지역을 자동으로 묶어 그룹별 특징을 파악합니다 | **Granger 인과성**: 특정 지표가 가격 변화를 몇 달 앞서 예측할 수 있는지 통계적으로 검정합니다")
     sub_cluster, sub_granger = st.tabs(["클러스터링", "Granger 인과성"])
 
