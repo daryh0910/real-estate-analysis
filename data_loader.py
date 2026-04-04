@@ -69,6 +69,9 @@ if not os.path.exists(CONSTRUCTION_PATH):
 # 캐시 경로
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 APT_CACHE_PARQUET = os.path.join(CACHE_DIR, "apt_sigungu_monthly.parquet")
+
+# KOSIS 연령대별/성별 인구 (시도, 연간) 경로 — CACHE_DIR 정의 후 배치
+KOSIS_AGE_POP_PATH = os.path.join(CACHE_DIR, "kosis_population_age_sido_yearly.csv")
 APT_DETAIL_CACHE_PARQUET = os.path.join(CACHE_DIR, "apt_sigungu_monthly_detail.parquet")  # 건축년도 포함
 JEONSE_CACHE_PARQUET = os.path.join(CACHE_DIR, "jeonse_sigungu_monthly.parquet")
 WOLSE_CACHE_PARQUET = os.path.join(CACHE_DIR, "wolse_sigungu_monthly.parquet")
