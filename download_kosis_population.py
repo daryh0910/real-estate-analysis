@@ -1,5 +1,5 @@
 """
-KOSIS 시도별 5세별 주민등록인구 수집 스크립트
+KOSIS 시도/시군구별 5세별 주민등록인구 수집 스크립트
 테이블: DT_1B04005N (행정구역/5세별 주민등록인구, 2011년~)
 
 수집 항목:
@@ -8,16 +8,23 @@ KOSIS 시도별 5세별 주민등록인구 수집 스크립트
   - → 10년 단위 집계: 20대, 30대, 40대, 50대이상
 
 사용법:
-    python download_kosis_population.py           # 전체 (2011~최신)
-    python download_kosis_population.py --test    # 2022~2023만 (빠른 확인)
+    python download_kosis_population.py                     # 시도 전체 (2011~최신)
+    python download_kosis_population.py --test              # 시도 2022~2023만 (빠른 확인)
+    python download_kosis_population.py --sigungu           # 시군구 전체 (2011~최신)
+    python download_kosis_population.py --sigungu --test    # 시군구 2022~2023만
 
 출력 파일:
-    cache/kosis_population_age_sido_yearly.csv
+    cache/kosis_population_age_sido_yearly.csv      (--sido, 기본)
+    cache/kosis_population_age_sigungu_yearly.csv   (--sigungu)
 
 KOSIS 파라미터:
     orgId=101, tblId=DT_1B04005N
-    C1=시도코드, C2=5세연령코드
+    C1=행정구역코드(시도 2자리 / 시군구 5자리), C2=5세연령코드
     itmId: T2=총인구, T3=남자, T4=여자
+
+셀 수 제한 (40,000):
+    시도:   17 × 22 × 3 × 10년 = 11,220  → 10년 청크
+    시군구: 250 × 22 × 3 × 2년 = 33,000  →  2년 청크
 """
 
 import os
