@@ -868,6 +868,28 @@ def load_csi_data():
     return pd.read_csv(CSI_PATH)
 
 
+def load_construction_data():
+    """
+    착공/준공 파이프라인 데이터 로드 (시도, 월별).
+
+    data/construction_pipeline_sido_monthly.csv 파일을 읽는다.
+    파일이 없으면 빈 DataFrame을 반환한다.
+
+    Returns:
+        DataFrame [연월, 시도, 착공_호수, 준공_호수, 연도, 월, ...]
+        또는 빈 DataFrame (파일 없음)
+    """
+    if not os.path.exists(CONSTRUCTION_PATH):
+        return pd.DataFrame(columns=["연월", "시도", "착공_호수", "준공_호수", "연도", "월"])
+
+    df = pd.read_csv(CONSTRUCTION_PATH)
+    if "시도" in df.columns:
+        df["시도"] = df["시도"].apply(_normalize_sido)
+        # 전국 집계 행 제외
+        df = df[df["시도"] != "전국"]
+    return df
+
+
 def load_policy_events():
     """
     정책 이벤트 DB 로드
