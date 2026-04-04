@@ -388,6 +388,71 @@ with main_tab1:
             )
             st.plotly_chart(fig_vol, use_container_width=True)
 
+        # ── 시장심리 게이지 (KB 매수우위지수, 주택가격전망CSI) ──────
+        gauge_cols_check = ["KB_매수우위지수", "주택가격전망CSI"]
+        gauge_available = [c for c in gauge_cols_check if c in analysis_df.columns and analysis_df[c].notna().any()]
+        if gauge_available:
+            st.subheader("시장심리 지표")
+            g_col1, g_col2 = st.columns(2)
+
+            # KB 매수우위지수 게이지 (0~200, 100이 중립)
+            if "KB_매수우위지수" in gauge_available:
+                kb_series = analysis_df["KB_매수우위지수"].dropna()
+                kb_val = float(kb_series.iloc[-1]) if not kb_series.empty else None
+                if kb_val is not None:
+                    fig_gauge_kb = go.Figure(go.Indicator(
+                        mode="gauge+number+delta",
+                        value=kb_val,
+                        title={"text": "KB 매수우위지수"},
+                        delta={"reference": 100, "valueformat": ".1f"},
+                        gauge={
+                            "axis": {"range": [0, 200]},
+                            "bar": {"color": "darkblue"},
+                            "steps": [
+                                {"range": [0, 80],   "color": "lightblue"},
+                                {"range": [80, 120],  "color": "lightyellow"},
+                                {"range": [120, 200], "color": "lightsalmon"},
+                            ],
+                            "threshold": {
+                                "line": {"color": "red", "width": 4},
+                                "thickness": 0.75,
+                                "value": 100,
+                            },
+                        },
+                    ))
+                    fig_gauge_kb.update_layout(height=300)
+                    with g_col1:
+                        st.plotly_chart(fig_gauge_kb, use_container_width=True)
+
+            # 주택가격전망CSI 게이지 (0~200, 100이 중립)
+            if "주택가격전망CSI" in gauge_available:
+                csi_series = analysis_df["주택가격전망CSI"].dropna()
+                csi_val = float(csi_series.iloc[-1]) if not csi_series.empty else None
+                if csi_val is not None:
+                    fig_gauge_csi = go.Figure(go.Indicator(
+                        mode="gauge+number+delta",
+                        value=csi_val,
+                        title={"text": "주택가격전망CSI"},
+                        delta={"reference": 100, "valueformat": ".1f"},
+                        gauge={
+                            "axis": {"range": [0, 200]},
+                            "bar": {"color": "darkorange"},
+                            "steps": [
+                                {"range": [0, 80],   "color": "lightblue"},
+                                {"range": [80, 120],  "color": "lightyellow"},
+                                {"range": [120, 200], "color": "lightsalmon"},
+                            ],
+                            "threshold": {
+                                "line": {"color": "red", "width": 4},
+                                "thickness": 0.75,
+                                "value": 100,
+                            },
+                        },
+                    ))
+                    fig_gauge_csi.update_layout(height=300)
+                    with g_col2:
+                        st.plotly_chart(fig_gauge_csi, use_container_width=True)
+
         # 원인 지표 트렌드 (시도 레벨)
         extra_vars = [v for v in cause_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
         if extra_vars:
