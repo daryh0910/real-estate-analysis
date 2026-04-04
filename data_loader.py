@@ -808,24 +808,6 @@ def load_migration_data():
 load_population_migration_data = load_migration_data
 
 
-def _load_population_migration_data_legacy():
-    """
-    인구이동(전입/전출/순이동) 데이터 로드 (시도, 월별)
-    Returns: DataFrame [연월, 시도, 전입, 전출, 순이동, 연도, 월]
-    """
-    if not os.path.exists(POP_MIGRATION_PATH):
-        return pd.DataFrame()
-    df = pd.read_csv(POP_MIGRATION_PATH)
-    # 필수 컬럼 확인 (download_public_data.py 재수집 전이면 컬럼이 다를 수 있음)
-    required_cols = {"시도", "전입", "전출", "순이동"}
-    if not required_cols.issubset(set(df.columns)):
-        return pd.DataFrame(columns=["연월", "시도", "전입", "전출", "순이동", "연도", "월"])
-    df["시도"] = df["시도"].apply(_normalize_sido)
-    # 전국 제외
-    df = df[df["시도"] != "전국"]
-    return df
-
-
 def load_base_rate_data():
     """
     기준금리/시장금리 로드 (전국, 월별)
