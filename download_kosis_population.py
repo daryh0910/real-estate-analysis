@@ -99,9 +99,14 @@ DEFAULT_START = 2011
 DEFAULT_END   = 2024
 
 # 1회 요청당 허용 셀 수: 40,000
-# 17시도 × 22연령 × 3항목 × n년 = 1,122 × n
-# → 최대 35년치 가능 (충분)
-MAX_YEAR_CHUNK = 10   # 안전하게 10년씩 분할
+# 시도:   17 × 22 × 3 × n년 = 1,122 × n  → 10년 청크
+# 시군구: 250 × 22 × 3 × n년 = 16,500 × n → 2년 청크
+MAX_YEAR_CHUNK_SIDO    = 10
+MAX_YEAR_CHUNK_SIGUNGU =  2
+
+# 시군구 코드: data_loader.SIGUNGU_NAME_MAP의 5자리 코드 전체
+# "+" 구분자로 연결 (KOSIS objL1 파라미터)
+SIGUNGU_CODES = "+".join(sorted(SIGUNGU_NAME_MAP.keys()))
 
 
 # ═══════════════════════════════════════════════════════
