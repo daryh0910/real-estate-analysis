@@ -655,6 +655,10 @@ with main_tab3:
         tab4_vol = "임대거래량"
         tab4_unit = "보증금단가_per_m2"
 
+    region_sub1, region_sub2, region_sub3 = st.tabs(["지역순위", "요약통계", "인구이동"])
+
+# ── 지역순위 서브탭 ─────────────────────────────────────────────────
+with region_sub1:
     if tab4_df.empty:
         st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
     else:
@@ -689,30 +693,6 @@ with main_tab3:
             )
             st.plotly_chart(fig_region, use_container_width=True)
 
-        # 시군구별 요약 테이블
-        st.subheader("시군구별 요약 통계")
-        summary = (
-            tab4_df.groupby(["지역코드"]).agg(**agg_dict)
-            .reset_index().sort_values(tab4_price, ascending=False)
-        )
-        summary["시군구명"] = summary["지역코드"].apply(get_sigungu_name)
-        if "시도" in tab4_df.columns:
-            sido_map = tab4_df.drop_duplicates("지역코드").set_index("지역코드")["시도"]
-            summary["시도"] = summary["지역코드"].map(sido_map)
-
-        display_cols = ["시군구명"]
-        if "시도" in summary.columns:
-            display_cols.append("시도")
-        display_cols += [c for c in [tab4_price, tab4_vol, tab4_unit] if c in summary.columns]
-        if "월세평균" in summary.columns:
-            display_cols.append("월세평균")
-
-        format_dict = {c: "{:,.0f}" for c in [tab4_price, tab4_vol, tab4_unit, "월세평균"] if c in summary.columns}
-        st.dataframe(
-            summary[display_cols].style.format(format_dict, na_rep="N/A"),
-            use_container_width=True,
-        )
-
         # 시군구별 가격 추이 비교
         if selected_codes:
             st.subheader(f"시군구별 {mode_label} 가격 추이")
@@ -745,6 +725,73 @@ with main_tab3:
                     title=f"시도별 {mode_label} 평균 가격 추이",
                 )
                 st.plotly_chart(fig_compare, use_container_width=True)
+
+# ── 요약통계 서브탭 ─────────────────────────────────────────────────
+with region_sub2:
+    if tab4_df.empty:
+        st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
+    else:
+        agg_dict_sum = {
+            tab4_price: (tab4_price, "mean"),
+            tab4_vol: (tab4_vol, "sum"),
+            tab4_unit: (tab4_unit, "mean"),
+        }
+        if "월세평균" in tab4_df.columns:
+            agg_dict_sum["월세평균"] = ("월세평균", "mean")
+
+        # 시군구별 요약 테이블
+        st.subheader("시군구별 요약 통계")
+        summary = (
+            tab4_df.groupby(["지역코드"]).agg(**agg_dict_sum)
+            .reset_index().sort_values(tab4_price, ascending=False)
+        )
+        summary["시군구명"] = summary["지역코드"].apply(get_sigungu_name)
+        if "시도" in tab4_df.columns:
+            sido_map = tab4_df.drop_duplicates("지역코드").set_index("지역코드")["시도"]
+            summary["시도"] = summary["지역코드"].map(sido_map)
+
+        display_cols = ["시군구명"]
+        if "시도" in summary.columns:
+            display_cols.append("시도")
+        display_cols += [c for c in [tab4_price, tab4_vol, tab4_unit] if c in summary.columns]
+        if "월세평균" in summary.columns:
+            display_cols.append("월세평균")
+
+        format_dict = {c: "{:,.0f}" for c in [tab4_price, tab4_vol, tab4_unit, "월세평균"] if c in summary.columns}
+        st.dataframe(
+            summary[display_cols].style.format(format_dict, na_rep="N/A"),
+            use_container_width=True,
+        )
+
+# ── 인구이동 서브탭 ─────────────────────────────────────────────────
+with region_sub3:
+    st.subheader("인구이동 현황")
+    # 인구이동 관련 컬럼 탐색 (전입, 전출, 순이동 포함)
+    migration_cols = [c for c in analysis_df.columns if "전입" in c or "전출" in c or "순이동" in c]
+    if migration_cols:
+        mig_sido = st.selectbox(
+            "시도 선택", selected_sido if selected_sido else all_sido, key="mig_sido"
+        )
+        mig_time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
+        mig_df = analysis_df[analysis_df["시도"] == mig_sido].sort_values(mig_time_col)
+
+        # 전입/전출/순이동 막대차트
+        avail_mig = [c for c in migration_cols if c in mig_df.columns and mig_df[c].notna().any()]
+        if avail_mig:
+            mig_melted = mig_df[[mig_time_col] + avail_mig].melt(
+                id_vars=[mig_time_col], var_name="구분", value_name="인원수"
+            )
+            fig_mig = px.bar(
+                mig_melted.sort_values(mig_time_col),
+                x=mig_time_col, y="인원수", color="구분", barmode="group",
+                title=f"{mig_sido}: 인구이동 현황",
+                labels={mig_time_col: "기간", "인원수": "인원(명)"},
+            )
+            st.plotly_chart(fig_mig, use_container_width=True)
+        else:
+            st.info("선택한 시도의 인구이동 데이터가 없습니다.")
+    else:
+        st.info("인구이동 데이터를 업데이트하면 이 탭에서 확인할 수 있습니다.")
 
 
 # ============================
