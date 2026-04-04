@@ -36,6 +36,10 @@ import subprocess
 import pandas as pd
 from dotenv import load_dotenv
 
+# data_loader의 시군구 코드 맵 사용
+sys.path.insert(0, os.path.dirname(__file__))
+from data_loader import SIGUNGU_NAME_MAP
+
 load_dotenv()
 
 # ═══════════════════════════════════════════════════════
