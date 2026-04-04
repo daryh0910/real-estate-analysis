@@ -1,0 +1,320 @@
+"""
+KOSIS 시도별 5세별 주민등록인구 수집 스크립트
+테이블: DT_1B04005N (행정구역/5세별 주민등록인구, 2011년~)
+
+수집 항목:
+  - 총인구, 남자인구, 여자인구
+  - 5세 단위 연령대별 (0~4세, 5~9세, ..., 100세+)
+  - → 10년 단위 집계: 20대, 30대, 40대, 50대이상
+
+사용법:
+    python download_kosis_population.py           # 전체 (2011~최신)
+    python download_kosis_population.py --test    # 2022~2023만 (빠른 확인)
+
+출력 파일:
+    cache/kosis_population_age_sido_yearly.csv
+
+KOSIS 파라미터:
+    orgId=101, tblId=DT_1B04005N
+    C1=시도코드, C2=5세연령코드
+    itmId: T2=총인구, T3=남자, T4=여자
+"""
+
+import os
+import sys
+import json
+import time
+import argparse
+import subprocess
+import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ═══════════════════════════════════════════════════════
+# 상수
+# ═══════════════════════════════════════════════════════
+
+KOSIS_API_URL = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
+CACHE_DIR     = os.path.join(os.path.dirname(__file__), "cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+ORG_ID = "101"
+TBL_ID = "DT_1B04005N"   # 행정구역/5세별 주민등록인구 (2011~)
+
+# 17개 시도 코드 (KOSIS C1 코드)
+SIDO_CODES = "11+21+22+23+24+25+26+29+31+32+33+34+35+36+37+38+39"
+
+SIDO_NAME = {
+    "11": "서울", "21": "부산", "22": "대구", "23": "인천",
+    "24": "광주", "25": "대전", "26": "울산", "29": "세종",
+    "31": "경기", "32": "강원", "33": "충북", "34": "충남",
+    "35": "전북", "36": "전남", "37": "경북", "38": "경남",
+    "39": "제주",
+}
+
+# C2: 5세 연령대 코드 (0=전체합계 + 5세구간 전체)
+# 0(합), 5(0~4), 10(5~9), 15(10~14), 20(15~19), 25(20~24), 30(25~29),
+# 35(30~34), 40(35~39), 45(40~44), 50(45~49), 55(50~54), 60(55~59),
+# 65(60~64), 70(65~69), 75(70~74), 80(75~79), 85(80~84), 90(85~89),
+# 95(90~94), 100(95~99), 105(100+)
+AGE_CODES = "0+5+10+15+20+25+30+35+40+45+50+55+60+65+70+75+80+85+90+95+100+105"
+
+# 5세 코드 → 연령대명 매핑
+AGE_CODE_TO_LABEL = {
+    "0":   "합계",
+    "5":   "0~4세",   "10":  "5~9세",
+    "15":  "10~14세", "20":  "15~19세",
+    "25":  "20~24세", "30":  "25~29세",
+    "35":  "30~34세", "40":  "35~39세",
+    "45":  "40~44세", "50":  "45~49세",
+    "55":  "50~54세", "60":  "55~59세",
+    "65":  "60~64세", "70":  "65~69세",
+    "75":  "70~74세", "80":  "75~79세",
+    "85":  "80~84세", "90":  "85~89세",
+    "95":  "90~94세", "100": "95~99세", "105": "100세이상",
+}
+
+# 10년 단위 집계에 사용할 5세 코드 목록
+AGE_DECADE_MAP = {
+    "20대":    ["25", "30"],           # 20~24 + 25~29
+    "30대":    ["35", "40"],           # 30~34 + 35~39
+    "40대":    ["45", "50"],           # 40~44 + 45~49
+    "50대이상": ["55","60","65","70","75","80","85","90","95","100","105"],
+}
+
+# 수집 연도 범위 (KOSIS 제공: 2011~)
+DEFAULT_START = 2011
+DEFAULT_END   = 2024
+
+# 1회 요청당 허용 셀 수: 40,000
+# 17시도 × 22연령 × 3항목 × n년 = 1,122 × n
+# → 최대 35년치 가능 (충분)
+MAX_YEAR_CHUNK = 10   # 안전하게 10년씩 분할
+
+
+# ═══════════════════════════════════════════════════════
+# API 호출 (PowerShell 폴백 포함)
+# ═══════════════════════════════════════════════════════
+
+def _api_call_ps(params: dict, timeout: int = 60) -> list | None:
+    """PowerShell을 통한 KOSIS API 호출 (WSL 네트워크 우회)"""
+    query = "&".join(f"{k}={v}" for k, v in params.items())
+    url   = f"{KOSIS_API_URL}?{query}"
+    ps    = (
+        f"$r = Invoke-RestMethod -Uri '{url}' -TimeoutSec {timeout}; "
+        f"$r | ConvertTo-Json -Depth 5 -Compress"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-Command", ps],
+            capture_output=True, text=True,
+            timeout=timeout + 30, encoding="utf-8", errors="replace",
+        )
+        raw = result.stdout.strip().lstrip("\ufeff")
+        if not raw:
+            raise ValueError(f"빈 응답. stderr: {result.stderr[:200]}")
+        data = json.loads(raw)
+        if isinstance(data, dict) and "err" in data:
+            raise ValueError(f"KOSIS 오류: err={data['err']} {data.get('errMsg','')}")
+        return data
+    except subprocess.TimeoutExpired:
+        raise TimeoutError("PowerShell 타임아웃")
+
+
+def _fetch_chunk(start_yr: int, end_yr: int) -> list:
+    """연도 범위를 지정하여 API 1회 호출"""
+    params = {
+        "method":     "getList",
+        "apiKey":     os.getenv("KOSIS_API_KEY", ""),
+        "orgId":      ORG_ID,
+        "tblId":      TBL_ID,
+        "itmId":      "T2+T3+T4",
+        "objL1":      SIDO_CODES,
+        "objL2":      AGE_CODES,
+        "format":     "json",
+        "jsonVD":     "Y",
+        "prdSe":      "Y",
+        "startPrdDe": str(start_yr),
+        "endPrdDe":   str(end_yr),
+    }
+    return _api_call_ps(params)
+
+
+# ═══════════════════════════════════════════════════════
+# 데이터 수집
+# ═══════════════════════════════════════════════════════
+
+def fetch_all(start_year: int = DEFAULT_START, end_year: int = DEFAULT_END) -> pd.DataFrame:
+    """전체 기간 수집 (청크 분할)"""
+    all_rows = []
+    years = list(range(start_year, end_year + 1))
+
+    # MAX_YEAR_CHUNK 단위로 분할 요청
+    for i in range(0, len(years), MAX_YEAR_CHUNK):
+        chunk_years = years[i : i + MAX_YEAR_CHUNK]
+        yr_s, yr_e  = chunk_years[0], chunk_years[-1]
+        print(f"  요청: {yr_s}~{yr_e}", end=" ... ", flush=True)
+        try:
+            data = _fetch_chunk(yr_s, yr_e)
+            print(f"{len(data)}행")
+            all_rows.extend(data)
+        except Exception as e:
+            print(f"실패: {e}")
+        time.sleep(0.5)
+
+    if not all_rows:
+        return pd.DataFrame()
+
+    return _parse(all_rows)
+
+
+# ═══════════════════════════════════════════════════════
+# 파싱 및 집계
+# ═══════════════════════════════════════════════════════
+
+def _parse(raw: list) -> pd.DataFrame:
+    """원시 API 응답 → 분석용 DataFrame 변환"""
+    rows = []
+    for r in raw:
+        sido_cd = r.get("C1", "")
+        age_cd  = str(r.get("C2", ""))
+        itm_id  = r.get("ITM_ID", "")
+        year    = int(r.get("PRD_DE", 0))
+        val     = _to_int(r.get("DT"))
+
+        gender = {
+            "T2": "합계",
+            "T3": "남",
+            "T4": "여",
+        }.get(itm_id)
+        if gender is None:
+            continue
+
+        age_label = AGE_CODE_TO_LABEL.get(age_cd, f"C2={age_cd}")
+        rows.append({
+            "시도코드": sido_cd,
+            "시도":     SIDO_NAME.get(sido_cd, sido_cd),
+            "연도":     year,
+            "연령코드": age_cd,
+            "연령대":   age_label,
+            "성별":     gender,
+            "인구":     val,
+        })
+
+    df_raw = pd.DataFrame(rows)
+    if df_raw.empty:
+        return df_raw
+
+    # 10년 단위 집계 컬럼 추가 (성별 × 연령대)
+    df_pivot = _build_decade_pivot(df_raw)
+    return df_pivot
+
+
+def _build_decade_pivot(df_raw: pd.DataFrame) -> pd.DataFrame:
+    """
+    원시 데이터(시도/연도/연령/성별/인구) →
+    분석 편의용 wide 형식:
+      [시도, 연도, 총인구, 남자인구, 여자인구,
+       인구_20대, 인구_30대, 인구_40대, 인구_50대이상,
+       남_20대, 남_30대, ..., 여_20대, ...]
+    """
+    base_key = ["시도코드", "시도", "연도"]
+
+    def _sum_decade(df, decade_name, gender, codes):
+        mask = (
+            df["연령코드"].isin(codes) &
+            (df["성별"] == gender)
+        )
+        return (
+            df[mask]
+            .groupby(base_key)["인구"]
+            .sum()
+            .rename(f"{'' if gender=='합계' else gender+'_'}{decade_name}")
+        )
+
+    # 전체 합계
+    tot = (
+        df_raw[(df_raw["연령코드"] == "0") & (df_raw["성별"] == "합계")]
+        .set_index(base_key)["인구"].rename("총인구")
+    )
+    male = (
+        df_raw[(df_raw["연령코드"] == "0") & (df_raw["성별"] == "남")]
+        .set_index(base_key)["인구"].rename("남자인구")
+    )
+    female = (
+        df_raw[(df_raw["연령코드"] == "0") & (df_raw["성별"] == "여")]
+        .set_index(base_key)["인구"].rename("여자인구")
+    )
+
+    parts = [tot, male, female]
+
+    # 10년 단위 합계 × 성별
+    for decade, codes in AGE_DECADE_MAP.items():
+        for gender in ["합계", "남", "여"]:
+            parts.append(_sum_decade(df_raw, decade, gender, codes))
+
+    result = pd.concat(parts, axis=1).reset_index()
+    result = result.sort_values(["시도", "연도"]).reset_index(drop=True)
+    return result
+
+
+# ═══════════════════════════════════════════════════════
+# 저장
+# ═══════════════════════════════════════════════════════
+
+def save(df: pd.DataFrame, filename: str = "kosis_population_age_sido_yearly.csv"):
+    path = os.path.join(CACHE_DIR, filename)
+    df.to_csv(path, index=False, encoding="utf-8-sig")
+    print(f"  ✅ 저장: {path}  ({len(df)}행, {len(df.columns)}컬럼)")
+    print(f"  컬럼: {df.columns.tolist()}")
+
+
+# ═══════════════════════════════════════════════════════
+# 유틸
+# ═══════════════════════════════════════════════════════
+
+def _to_int(v) -> int | None:
+    try:
+        return int(str(v).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+# ═══════════════════════════════════════════════════════
+# 메인
+# ═══════════════════════════════════════════════════════
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="KOSIS 시도별 5세별 주민등록인구 수집 (DT_1B04005N)"
+    )
+    parser.add_argument("--test",  action="store_true", help="2022~2023만 빠른 테스트")
+    parser.add_argument("--start", type=int, default=DEFAULT_START, help=f"시작연도 (기본: {DEFAULT_START})")
+    parser.add_argument("--end",   type=int, default=DEFAULT_END,   help=f"종료연도 (기본: {DEFAULT_END})")
+    args = parser.parse_args()
+
+    if args.test:
+        start_yr, end_yr = 2022, 2023
+    else:
+        start_yr, end_yr = args.start, args.end
+
+    print("=" * 60)
+    print("KOSIS 시도별 성/연령별 주민등록인구 수집")
+    print(f"테이블: {TBL_ID} | 기간: {start_yr}~{end_yr}")
+    print("=" * 60)
+
+    df = fetch_all(start_yr, end_yr)
+
+    if df.empty:
+        print("  ✗ 데이터 없음")
+        sys.exit(1)
+
+    print(f"\n수집 완료: {len(df)}행")
+    print(df.head(5).to_string())
+
+    save(df)
+
+
+if __name__ == "__main__":
+    main()
