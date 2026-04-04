@@ -66,9 +66,6 @@ CONSTRUCTION_PATH = os.path.join(_PROJECT_ROOT, "data", "construction_pipeline_s
 if not os.path.exists(CONSTRUCTION_PATH):
     CONSTRUCTION_PATH = os.path.join(DEMAND_DIR, "construction_pipeline_sido_monthly.csv")
 
-# KOSIS 연령대별/성별 인구 (시도, 연간) 경로
-KOSIS_AGE_POP_PATH = os.path.join(CACHE_DIR, "kosis_population_age_sido_yearly.csv")
-
 # 캐시 경로
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 APT_CACHE_PARQUET = os.path.join(CACHE_DIR, "apt_sigungu_monthly.parquet")
