@@ -508,10 +508,28 @@ def load_rent_data(rent_type="jeonse", chunksize=500_000, keep_sido=True, force_
     return result
 
 
+def _parse_pop_int(val):
+    """인구 문자열을 정수로 변환 (콤마/따옴표 제거, 실패 시 None 반환)"""
+    s = str(val).replace(",", "").replace('"', "").strip()
+    try:
+        return int(s)
+    except ValueError:
+        return None
+
+
 def load_population_data():
     """
-    연령대별 인구 CSV 3개 파일 로드 → 시도별 총인구 연도별 집계
-    Returns: DataFrame [시도, 연도, 총인구]
+    연령대별 인구 CSV 3개 파일 로드 → 시도별 연도별 인구 집계.
+
+    원본 파일 컬럼 구조:
+      행정구역 | YYYY년_계_총인구수 | YYYY년_계_연령구간인구수 | YYYY년_계_0~4세
+               | YYYY년_남_총인구수 | YYYY년_남_연령구간인구수 | YYYY년_남_0~4세
+               | YYYY년_여_총인구수 | YYYY년_여_연령구간인구수 | YYYY년_여_0~4세
+      (연령대별 세부 컬럼은 0~4세 구간 하나만 존재)
+
+    Returns:
+        DataFrame [시도, 연도, 총인구, 인구_남성, 인구_여성]
+        ※ 연령대별(20대/30대 등) 세부 컬럼은 원본 파일에 없어 추출 불가
     """
     pop_files = [
         "201312_201512_연령별인구현황_연간.csv",
@@ -524,31 +542,55 @@ def load_population_data():
         if not os.path.exists(fpath):
             continue
         df = read_csv_auto(fpath)
+
         for _, row in df.iterrows():
             region = str(row.iloc[0])
             if "(" not in region:
                 continue
             name_part = region.split("(")[0].strip()
             code_part = region.split("(")[1].replace(")", "").strip()
-            if len(code_part) == 10 and code_part[2:] == "00000000":
-                sido = _normalize_sido(name_part)
-                for col in df.columns:
-                    if "계_총인구수" in str(col):
-                        year_str = str(col).split("년")[0]
-                        try:
-                            year = int(year_str)
-                        except ValueError:
-                            continue
-                        pop_val = str(row[col]).replace(",", "").replace('"', "").strip()
-                        try:
-                            pop = int(pop_val)
-                        except ValueError:
-                            continue
-                        all_rows.append({"시도": sido, "연도": year, "총인구": pop})
+            # 시도 레벨 행 판별: 10자리 코드, 뒤 8자리가 모두 0
+            if not (len(code_part) == 10 and code_part[2:] == "00000000"):
+                continue
+
+            sido = _normalize_sido(name_part)
+            if sido is None:
+                continue
+
+            for col in df.columns:
+                col_str = str(col)
+                # 총인구 추출: YYYY년_계_총인구수
+                if "계_총인구수" in col_str:
+                    year_str = col_str.split("년")[0]
+                    try:
+                        year = int(year_str)
+                    except ValueError:
+                        continue
+                    pop = _parse_pop_int(row[col])
+                    if pop is None:
+                        continue
+
+                    # 동일 행에서 남성/여성 총인구 컬럼 탐색
+                    male_col = col_str.replace("계_총인구수", "남_총인구수")
+                    female_col = col_str.replace("계_총인구수", "여_총인구수")
+                    male_pop = _parse_pop_int(row[male_col]) if male_col in df.columns else None
+                    female_pop = _parse_pop_int(row[female_col]) if female_col in df.columns else None
+
+                    entry = {"시도": sido, "연도": year, "총인구": pop}
+                    if male_pop is not None:
+                        entry["인구_남성"] = male_pop
+                    if female_pop is not None:
+                        entry["인구_여성"] = female_pop
+                    all_rows.append(entry)
 
     if not all_rows:
         return pd.DataFrame(columns=["시도", "연도", "총인구"])
-    return pd.DataFrame(all_rows).drop_duplicates(subset=["시도", "연도"])
+
+    result = pd.DataFrame(all_rows).drop_duplicates(subset=["시도", "연도"])
+
+    # 반환 컬럼 안내 (연령대별 컬럼은 원본 파일 미지원으로 제외)
+    # 현재 반환: 시도, 연도, 총인구, 인구_남성(있으면), 인구_여성(있으면)
+    return result
 
 
 def load_grdp_data():
