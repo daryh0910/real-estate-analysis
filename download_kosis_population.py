@@ -138,15 +138,15 @@ def _api_call_ps(params: dict, timeout: int = 60) -> list | None:
         raise TimeoutError("PowerShell 타임아웃")
 
 
-def _fetch_chunk(start_yr: int, end_yr: int) -> list:
-    """연도 범위를 지정하여 API 1회 호출"""
+def _fetch_chunk(start_yr: int, end_yr: int, region_codes: str = SIDO_CODES) -> list:
+    """연도 범위와 지역코드를 지정하여 API 1회 호출"""
     params = {
         "method":     "getList",
         "apiKey":     os.getenv("KOSIS_API_KEY", ""),
         "orgId":      ORG_ID,
         "tblId":      TBL_ID,
         "itmId":      "T2+T3+T4",
-        "objL1":      SIDO_CODES,
+        "objL1":      region_codes,
         "objL2":      AGE_CODES,
         "format":     "json",
         "jsonVD":     "Y",
