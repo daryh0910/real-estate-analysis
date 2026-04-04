@@ -1282,6 +1282,22 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
                 kb_merge = kb_df[["시도", "연도", "월"] + kb_cols].copy()
                 merged = merged.merge(kb_merge, on=["시도", "연도", "월"], how="left")
 
+    # KOSIS 연령대별/성별 인구 데이터 병합 (시도, 연간)
+    # monthly 모드에서도 연도별로 병합 (연간 데이터이므로 연도 키만 사용)
+    if kosis_age_pop_df is not None and not kosis_age_pop_df.empty:
+        age_pop_cols = [c for c in kosis_age_pop_df.columns if c not in ["시도", "연도"]]
+        if age_pop_cols and "시도" in kosis_age_pop_df.columns and "연도" in kosis_age_pop_df.columns:
+            age_pop_merge_cols = ["시도", "연도"] + age_pop_cols
+            # 기존 merged에 동일 컬럼이 있으면 충돌 방지를 위해 제외
+            existing_cols = set(merged.columns)
+            new_age_cols = [c for c in age_pop_cols if c not in existing_cols]
+            if new_age_cols:
+                merged = merged.merge(
+                    kosis_age_pop_df[["시도", "연도"] + new_age_cols],
+                    on=["시도", "연도"],
+                    how="left",
+                )
+
     # ── 파생지표 계산 ────────────────────────────────────────────
     _safe = lambda col: merged[col].replace(0, np.nan)
 
