@@ -61,6 +61,11 @@ CSI_PATH = os.path.join(DEMAND_DIR, "csi_monthly.csv")
 KB_MARKET_PATH = os.path.join(DEMAND_DIR, "kb_market_supply_demand_monthly.csv")
 POLICY_EVENTS_PATH = os.path.join(_PROJECT_ROOT, "data", "policy_events.csv")
 
+# 착공/준공 파이프라인 경로 (data/ 디렉토리 우선, 없으면 DEMAND_DIR 탐색)
+CONSTRUCTION_PATH = os.path.join(_PROJECT_ROOT, "data", "construction_pipeline_sido_monthly.csv")
+if not os.path.exists(CONSTRUCTION_PATH):
+    CONSTRUCTION_PATH = os.path.join(DEMAND_DIR, "construction_pipeline_sido_monthly.csv")
+
 # 캐시 경로
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 APT_CACHE_PARQUET = os.path.join(CACHE_DIR, "apt_sigungu_monthly.parquet")
