@@ -1208,10 +1208,76 @@ with main_tab4:
 
 
 # ============================
-# Tab 5: 통계분석 (회귀 + 이상치)
+# Tab 5: 공급분석 (인허가/착공/준공 + 미분양)
 # ============================
 with main_tab5:
-    sub_reg, sub_outlier = st.tabs(["회귀분석", "이상치 탐지"])
+    st.header("공급분석")
+    supply_sub1, supply_sub2 = st.tabs(["인허가/착공/준공", "미분양"])
+
+    with supply_sub1:
+        # analysis_df에서 공급 관련 컬럼 탐색
+        supply_cols = [c for c in ["인허가_호수", "착공_호수", "준공_호수"] if c in analysis_df.columns]
+        if supply_cols:
+            sup_sido = st.selectbox(
+                "시도 선택", selected_sido if selected_sido else all_sido, key="supply_sido"
+            )
+            sup_time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
+            sup_df = analysis_df[analysis_df["시도"] == sup_sido].sort_values(sup_time_col)
+
+            avail_supply = [c for c in supply_cols if sup_df[c].notna().any()]
+            if avail_supply:
+                sup_melted = sup_df[[sup_time_col] + avail_supply].melt(
+                    id_vars=[sup_time_col], var_name="구분", value_name="호수"
+                )
+                fig_supply = px.line(
+                    sup_melted.sort_values(sup_time_col),
+                    x=sup_time_col, y="호수", color="구분",
+                    title=f"{sup_sido}: 인허가/착공/준공 추이",
+                    labels={sup_time_col: "기간", "호수": "호수(호)"},
+                    markers=True,
+                )
+                st.plotly_chart(fig_supply, use_container_width=True)
+            else:
+                st.info("선택한 시도의 착공/준공 데이터가 없습니다.")
+        else:
+            st.info("착공/준공 데이터를 업데이트하면 이 탭에서 확인할 수 있습니다.")
+
+    with supply_sub2:
+        # 미분양 데이터 탐색
+        unsold_cols = [c for c in ["미분양_호수", "미분양_평균"] if c in analysis_df.columns]
+        if unsold_cols:
+            unsold_time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
+            # 시도별 미분양 시계열
+            unsold_var = st.selectbox("미분양 지표", unsold_cols, key="unsold_var")
+            unsold_df = analysis_df.groupby(["시도", unsold_time_col])[unsold_var].mean().reset_index()
+            fig_unsold = px.line(
+                unsold_df.sort_values(unsold_time_col),
+                x=unsold_time_col, y=unsold_var, color="시도",
+                title=f"시도별 {unsold_var} 추이",
+                labels={unsold_time_col: "기간"},
+                markers=True,
+            )
+            st.plotly_chart(fig_unsold, use_container_width=True)
+
+            # 최근 연도 시도별 막대 비교
+            unsold_latest_yr = int(analysis_df["연도"].max())
+            unsold_latest = analysis_df[analysis_df["연도"] == unsold_latest_yr].groupby("시도")[unsold_var].mean().reset_index()
+            unsold_latest = unsold_latest.sort_values(unsold_var, ascending=False)
+            fig_unsold_bar = px.bar(
+                unsold_latest, x="시도", y=unsold_var,
+                color=unsold_var, color_continuous_scale="Reds",
+                title=f"{unsold_latest_yr}년 시도별 {unsold_var}",
+            )
+            st.plotly_chart(fig_unsold_bar, use_container_width=True)
+        else:
+            st.info("미분양 데이터를 업데이트하면 이 탭에서 확인할 수 있습니다.")
+
+
+# ============================
+# Tab 6: 통계분석 (회귀 + 이상치 + 상관관계)
+# ============================
+with main_tab6:
+    sub_reg, sub_outlier, sub_corr = st.tabs(["회귀분석", "이상치 탐지", "상관관계 분석"])
 
 with sub_reg:
     st.header("다중회귀 분석")
