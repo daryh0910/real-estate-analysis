@@ -601,6 +601,54 @@ def load_population_data():
     return result
 
 
+def load_kosis_age_population():
+    """
+    KOSIS 연령대별/성별 인구 데이터 로드 (시도, 연간).
+
+    파일: cache/kosis_population_age_sido_yearly.csv
+    컬럼: 시도, 연도, 총인구, 남자인구, 여자인구,
+           20대, 남_20대, 여_20대,
+           30대, 남_30대, 여_30대,
+           40대, 남_40대, 여_40대,
+           50대이상, 남_50대이상, 여_50대이상
+
+    merge_all()에서 병합 시 기존 load_population_data()가 제공하는
+    총인구/인구_남성/인구_여성와 중복을 피하기 위해
+    총인구·남자인구·여자인구 컬럼은 제외하고 연령대별 컬럼만 반환한다.
+
+    Returns:
+        DataFrame [시도, 연도, 20대, 남_20대, 여_20대,
+                              30대, 남_30대, 여_30대,
+                              40대, 남_40대, 여_40대,
+                              50대이상, 남_50대이상, 여_50대이상]
+        파일이 없으면 빈 DataFrame 반환.
+    """
+    if not os.path.exists(KOSIS_AGE_POP_PATH):
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_csv(KOSIS_AGE_POP_PATH, encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        df = pd.read_csv(KOSIS_AGE_POP_PATH, encoding="cp949")
+
+    # 필수 컬럼 확인
+    required_keys = ["시도", "연도"]
+    if not all(c in df.columns for c in required_keys):
+        return pd.DataFrame()
+
+    # 연도를 int로 통일
+    df["연도"] = pd.to_numeric(df["연도"], errors="coerce").dropna().astype(int)
+    df = df.dropna(subset=["연도"])
+    df["연도"] = df["연도"].astype(int)
+
+    # 기존 load_population_data()와 컬럼 충돌 방지:
+    # 총인구·남자인구·여자인구는 이미 pop_df에서 제공하므로 제외
+    drop_cols = [c for c in ["시도코드", "총인구", "남자인구", "여자인구"] if c in df.columns]
+    df = df.drop(columns=drop_cols)
+
+    return df.reset_index(drop=True)
+
+
 def load_grdp_data():
     """
     GRDP CSV 로드 (wide → long 변환)
