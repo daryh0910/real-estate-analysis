@@ -262,15 +262,20 @@ def _parse(raw: list, level: str = "sido") -> pd.DataFrame:
     return _build_decade_pivot(df_raw, level=level)
 
 
-def _build_decade_pivot(df_raw: pd.DataFrame) -> pd.DataFrame:
+def _build_decade_pivot(df_raw: pd.DataFrame, level: str = "sido") -> pd.DataFrame:
     """
-    원시 데이터(시도/연도/연령/성별/인구) →
+    원시 데이터(지역/연도/연령/성별/인구) →
     분석 편의용 wide 형식:
-      [시도, 연도, 총인구, 남자인구, 여자인구,
+      [지역코드, 지역명, 연도, 총인구, 남자인구, 여자인구,
        인구_20대, 인구_30대, 인구_40대, 인구_50대이상,
-       남_20대, 남_30대, ..., 여_20대, ...]
+       남_20대, ..., 여_20대, ...]
     """
-    base_key = ["시도코드", "시도", "연도"]
+    if level == "sigungu":
+        base_key = ["시군구코드", "시군구", "시도코드", "시도", "연도"]
+        sort_key = ["시도", "시군구", "연도"]
+    else:
+        base_key = ["시도코드", "시도", "연도"]
+        sort_key = ["시도", "연도"]
 
     def _sum_decade(df, decade_name, gender, codes):
         mask = (
@@ -306,7 +311,7 @@ def _build_decade_pivot(df_raw: pd.DataFrame) -> pd.DataFrame:
             parts.append(_sum_decade(df_raw, decade, gender, codes))
 
     result = pd.concat(parts, axis=1).reset_index()
-    result = result.sort_values(["시도", "연도"]).reset_index(drop=True)
+    result = result.sort_values(sort_key).reset_index(drop=True)
     return result
 
 
