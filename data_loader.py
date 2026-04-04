@@ -1378,6 +1378,8 @@ def load_all_data(force_rebuild=False):
         kb_df = load_kb_market_data()
     with st.spinner("착공/준공 파이프라인 데이터 로딩 중..."):
         construction_df = load_construction_data()
+    with st.spinner("KOSIS 연령대별 인구 데이터 로딩 중..."):
+        kosis_age_pop_df = load_kosis_age_population()
 
     merge_kwargs = dict(
         jeonse_df=jeonse_df, wolse_df=wolse_df, rent_all_df=rent_all_df,
@@ -1388,6 +1390,7 @@ def load_all_data(force_rebuild=False):
         jeonwolse_df=jeonwolse_df, price_index_df=price_index_df,
         csi_df=csi_df, kb_df=kb_df,
         construction_df=construction_df,
+        kosis_age_pop_df=kosis_age_pop_df,
     )
 
     yearly = merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly", **merge_kwargs)
