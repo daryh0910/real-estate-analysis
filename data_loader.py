@@ -1120,6 +1120,26 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
                 unsold_df[unsold_cols], on=["시도", "연도", "월"], how="left"
             )
 
+    # 착공/준공 파이프라인 데이터 병합 (시도, 월별)
+    if construction_df is not None and not construction_df.empty:
+        constr_cols = ["착공_호수", "준공_호수"]
+        constr_cols = [c for c in constr_cols if c in construction_df.columns]
+        if constr_cols:
+            if freq == "yearly":
+                # 연도별: 착공/준공 호수 합산
+                constr_yearly = (
+                    construction_df.groupby(["시도", "연도"])[constr_cols]
+                    .sum()
+                    .reset_index()
+                )
+                merged = merged.merge(constr_yearly, on=["시도", "연도"], how="left")
+            else:
+                constr_merge_cols = ["시도", "연도", "월"] + constr_cols
+                avail_cols = [c for c in constr_merge_cols if c in construction_df.columns]
+                merged = merged.merge(
+                    construction_df[avail_cols], on=["시도", "연도", "월"], how="left"
+                )
+
     # 하위호환: migration_df가 전달되면 land_price_df로 사용
     if land_price_df is None and migration_df is not None:
         land_price_df = migration_df
