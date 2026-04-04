@@ -1410,6 +1410,7 @@ def load_all_data(force_rebuild=False):
         "nts": nts_df,
         "unsold": unsold_df,
         "construction": construction_df,
+        "kosis_age_pop": kosis_age_pop_df,
         "land_price": land_price_df,
         "pop_migration": pop_migration_df,
         "migration": land_price_df,  # 하위호환: 기존 코드에서 "migration" 키 참조 시
