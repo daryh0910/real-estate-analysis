@@ -241,12 +241,14 @@ def _parse(raw: list, level: str = "sido") -> pd.DataFrame:
         age_label = AGE_CODE_TO_LABEL.get(age_cd, f"C2={age_cd}")
 
         if level == "sigungu":
-            region_nm = SIGUNGU_NAME_MAP.get(region_cd, region_cd)
+            region_nm   = SIGUNGU_NAME_MAP.get(region_cd, region_cd)
+            sido_prefix = region_cd[:2]
+            sido_nm     = SIGUNGU_SIDO_PREFIX.get(sido_prefix, sido_prefix)
             row = {
                 "시군구코드": region_cd,
                 "시군구":     region_nm,
-                "시도코드":   region_cd[:2],
-                "시도":       SIDO_NAME.get(region_cd[:2], region_cd[:2]),
+                "시도코드":   sido_prefix,
+                "시도":       sido_nm,
                 "연도":       year,
                 "연령코드":   age_cd,
                 "연령대":     age_label,
