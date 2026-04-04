@@ -343,11 +343,12 @@ def _to_int(v) -> int | None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="KOSIS 시도별 5세별 주민등록인구 수집 (DT_1B04005N)"
+        description="KOSIS 시도/시군구별 5세별 주민등록인구 수집 (DT_1B04005N)"
     )
-    parser.add_argument("--test",  action="store_true", help="2022~2023만 빠른 테스트")
-    parser.add_argument("--start", type=int, default=DEFAULT_START, help=f"시작연도 (기본: {DEFAULT_START})")
-    parser.add_argument("--end",   type=int, default=DEFAULT_END,   help=f"종료연도 (기본: {DEFAULT_END})")
+    parser.add_argument("--sigungu", action="store_true", help="시군구 단위 수집 (기본: 시도)")
+    parser.add_argument("--test",    action="store_true", help="2022~2023만 빠른 테스트")
+    parser.add_argument("--start",   type=int, default=DEFAULT_START, help=f"시작연도 (기본: {DEFAULT_START})")
+    parser.add_argument("--end",     type=int, default=DEFAULT_END,   help=f"종료연도 (기본: {DEFAULT_END})")
     args = parser.parse_args()
 
     if args.test:
@@ -355,12 +356,24 @@ def main():
     else:
         start_yr, end_yr = args.start, args.end
 
+    if args.sigungu:
+        level_label = "시군구"
+        out_file    = "kosis_population_age_sigungu_yearly.csv"
+        n_regions   = len(SIGUNGU_NAME_MAP)
+    else:
+        level_label = "시도"
+        out_file    = "kosis_population_age_sido_yearly.csv"
+        n_regions   = len(SIDO_NAME)
+
     print("=" * 60)
-    print("KOSIS 시도별 성/연령별 주민등록인구 수집")
-    print(f"테이블: {TBL_ID} | 기간: {start_yr}~{end_yr}")
+    print(f"KOSIS {level_label}별 성/연령별 주민등록인구 수집")
+    print(f"테이블: {TBL_ID} | 기간: {start_yr}~{end_yr} | 지역 {n_regions}개")
     print("=" * 60)
 
-    df = fetch_all(start_yr, end_yr)
+    if args.sigungu:
+        df = fetch_all_sigungu(start_yr, end_yr)
+    else:
+        df = fetch_all(start_yr, end_yr)
 
     if df.empty:
         print("  ✗ 데이터 없음")
@@ -369,7 +382,7 @@ def main():
     print(f"\n수집 완료: {len(df)}행")
     print(df.head(5).to_string())
 
-    save(df)
+    save(df, out_file)
 
 
 if __name__ == "__main__":
