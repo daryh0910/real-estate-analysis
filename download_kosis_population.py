@@ -162,17 +162,16 @@ def _fetch_chunk(start_yr: int, end_yr: int, region_codes: str = SIDO_CODES) -> 
 # ═══════════════════════════════════════════════════════
 
 def fetch_all(start_year: int = DEFAULT_START, end_year: int = DEFAULT_END) -> pd.DataFrame:
-    """전체 기간 수집 (청크 분할)"""
+    """시도 단위 전체 기간 수집 (10년 청크)"""
     all_rows = []
     years = list(range(start_year, end_year + 1))
 
-    # MAX_YEAR_CHUNK 단위로 분할 요청
-    for i in range(0, len(years), MAX_YEAR_CHUNK):
-        chunk_years = years[i : i + MAX_YEAR_CHUNK]
+    for i in range(0, len(years), MAX_YEAR_CHUNK_SIDO):
+        chunk_years = years[i : i + MAX_YEAR_CHUNK_SIDO]
         yr_s, yr_e  = chunk_years[0], chunk_years[-1]
-        print(f"  요청: {yr_s}~{yr_e}", end=" ... ", flush=True)
+        print(f"  요청(시도): {yr_s}~{yr_e}", end=" ... ", flush=True)
         try:
-            data = _fetch_chunk(yr_s, yr_e)
+            data = _fetch_chunk(yr_s, yr_e, SIDO_CODES)
             print(f"{len(data)}행")
             all_rows.extend(data)
         except Exception as e:
@@ -182,7 +181,30 @@ def fetch_all(start_year: int = DEFAULT_START, end_year: int = DEFAULT_END) -> p
     if not all_rows:
         return pd.DataFrame()
 
-    return _parse(all_rows)
+    return _parse(all_rows, level="sido")
+
+
+def fetch_all_sigungu(start_year: int = DEFAULT_START, end_year: int = DEFAULT_END) -> pd.DataFrame:
+    """시군구 단위 전체 기간 수집 (2년 청크)"""
+    all_rows = []
+    years = list(range(start_year, end_year + 1))
+
+    for i in range(0, len(years), MAX_YEAR_CHUNK_SIGUNGU):
+        chunk_years = years[i : i + MAX_YEAR_CHUNK_SIGUNGU]
+        yr_s, yr_e  = chunk_years[0], chunk_years[-1]
+        print(f"  요청(시군구): {yr_s}~{yr_e}", end=" ... ", flush=True)
+        try:
+            data = _fetch_chunk(yr_s, yr_e, SIGUNGU_CODES)
+            print(f"{len(data)}행")
+            all_rows.extend(data)
+        except Exception as e:
+            print(f"실패: {e}")
+        time.sleep(0.8)   # 시군구 응답이 크므로 약간 긴 딜레이
+
+    if not all_rows:
+        return pd.DataFrame()
+
+    return _parse(all_rows, level="sigungu")
 
 
 # ═══════════════════════════════════════════════════════
