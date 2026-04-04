@@ -778,11 +778,37 @@ def load_land_price_data():
     return df
 
 
-# 하위호환: 기존 코드에서 load_migration_data()를 호출하는 경우 대응
-load_migration_data = load_land_price_data
+def load_migration_data():
+    """
+    인구이동(전입/전출/순이동) 데이터 로딩 — 공공데이터 수집 파일 사용.
+
+    download_public_data.py 실행 후 생성되는
+    population_migration_sido_monthly.csv 파일을 읽는다.
+    파일이 없거나 필수 컬럼(전입/전출/순이동)이 없으면 빈 DataFrame을 반환한다.
+
+    Returns:
+        DataFrame [연월, 시도, 전입, 전출, 순이동, 연도, 월]
+        또는 빈 DataFrame (파일 없음 / 컬럼 불일치)
+    """
+    if not os.path.exists(POP_MIGRATION_PATH):
+        return pd.DataFrame(columns=["연월", "시도", "전입", "전출", "순이동", "연도", "월"])
+
+    df = pd.read_csv(POP_MIGRATION_PATH)
+    required_cols = {"시도", "전입", "전출", "순이동"}
+    if not required_cols.issubset(set(df.columns)):
+        return pd.DataFrame(columns=["연월", "시도", "전입", "전출", "순이동", "연도", "월"])
+
+    df["시도"] = df["시도"].apply(_normalize_sido)
+    # 전국 집계 행 제외
+    df = df[df["시도"] != "전국"]
+    return df
 
 
-def load_population_migration_data():
+# 하위호환: 기존 코드에서 load_population_migration_data()를 호출하는 경우 대응
+load_population_migration_data = load_migration_data
+
+
+def _load_population_migration_data_legacy():
     """
     인구이동(전입/전출/순이동) 데이터 로드 (시도, 월별)
     Returns: DataFrame [연월, 시도, 전입, 전출, 순이동, 연도, 월]
