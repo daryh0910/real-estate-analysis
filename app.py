@@ -1366,6 +1366,7 @@ with sub_reg:
                 st.subheader("변수 중요도 (표준화 계수)")
                 fig_imp = px.bar(importance_df, x="변수", y="중요도", color="중요도",
                                  color_continuous_scale="Blues", title="변수별 영향력")
+                register_fig("회귀_변수중요도", fig_imp, "통계분석")
                 st.plotly_chart(fig_imp, use_container_width=True)
 
             except (ValueError, ImportError) as e:
