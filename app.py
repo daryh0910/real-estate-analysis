@@ -888,6 +888,10 @@ with main_tab4:
     ])
     if "설명" in VAR_META.columns:
         VAR_META["설명"] = VAR_META["설명"].fillna("")
+        # 설명 끝에 [출처] 태그 자동 부착
+        VAR_META["설명"] = VAR_META.apply(
+            lambda r: f'{r["설명"]} [{r["출처"]}]' if r["설명"] else f'[{r["출처"]}]', axis=1
+        )
 
     with st.expander("변수 목록 및 메타데이터"):
         # 카테고리/출처/설명 컬럼 포함하여 표시
