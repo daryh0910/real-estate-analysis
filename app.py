@@ -435,6 +435,7 @@ with main_tab1:
                     ))
                     fig_gauge_kb.update_layout(height=300)
                     with g_col1:
+                        register_fig("KB_매수우위_게이지", fig_gauge_kb, "Overview")
                         st.plotly_chart(fig_gauge_kb, use_container_width=True)
 
             # 주택가격전망CSI 게이지 (0~200, 100이 중립)
