@@ -1229,6 +1229,7 @@ with main_tab4:
                         title_text=f"{right_f_label} ({y_axis_label_5})",
                         secondary_y=True, title_font=dict(color="tomato"),
                     )
+                    register_fig("수식_듀얼축", fig_dual, "수요-공급 분석기")
                     st.plotly_chart(fig_dual, use_container_width=True, key="calc5_dual")
 
                     common_5 = pd.merge(
