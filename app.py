@@ -653,6 +653,7 @@ with sub_gap:
         fig_gap.update_layout(title=f"{gap_sido}: 매매-전세 갭 & 전세가율", xaxis_title="기간")
         fig_gap.update_yaxes(title_text="갭(만원)", secondary_y=False)
         fig_gap.update_yaxes(title_text="전세가율(%)", secondary_y=True)
+        register_fig("갭분석", fig_gap, "시장분석")
         st.plotly_chart(fig_gap, use_container_width=True)
     else:
         st.info("매매가격과 전세보증금 데이터가 모두 있어야 갭분석을 할 수 있습니다.")
