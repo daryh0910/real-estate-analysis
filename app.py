@@ -1566,6 +1566,7 @@ with sub_cluster:
                         ))
                     fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
                                             title="클러스터 프로파일")
+                    register_fig("레이더차트", fig_radar, "고급분석")
                     st.plotly_chart(fig_radar, use_container_width=True)
 
             except (ValueError, ImportError) as e:
