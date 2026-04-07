@@ -1442,6 +1442,7 @@ with sub_corr:
                 labels={"color": "상관계수"},
             )
             fig_heatmap.update_layout(width=700, height=600)
+            register_fig("상관관계_히트맵", fig_heatmap, "통계분석")
             st.plotly_chart(fig_heatmap, use_container_width=True)
 
             with st.expander("p-value 상세"):
