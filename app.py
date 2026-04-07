@@ -1630,3 +1630,175 @@ with sub_granger:
 
             except (ValueError, ImportError) as e:
                 st.error(str(e))
+
+
+# ============================
+# Tab 8: 커뮤니티 게시판
+# ============================
+with main_tab8:
+    st.header("커뮤니티 게시판")
+    st.caption("차트와 분석 설정을 저장하고 다른 사용자와 공유합니다.")
+
+    from board import (get_posts, get_post, get_post_count, delete_post,
+                       toggle_like, add_comment, get_comments)
+
+    # 세션 초기화
+    if "board_view" not in st.session_state:
+        st.session_state["board_view"] = ("gallery",)
+    if "board_page" not in st.session_state:
+        st.session_state["board_page"] = 1
+    if "board_session_id" not in st.session_state:
+        import uuid
+        st.session_state["board_session_id"] = str(uuid.uuid4())
+
+    view_mode = st.session_state["board_view"]
+
+    if view_mode[0] == "detail" and len(view_mode) > 1:
+        # --- 상세 뷰 ---
+        post = get_post(view_mode[1])
+        if post is None:
+            st.error("게시글을 찾을 수 없습니다.")
+            if st.button("목록으로"):
+                st.session_state["board_view"] = ("gallery",)
+                st.rerun()
+        else:
+            if st.button("← 목록으로"):
+                st.session_state["board_view"] = ("gallery",)
+                st.rerun()
+
+            st.subheader(post["title"])
+            col_info, col_like = st.columns([3, 1])
+            with col_info:
+                st.caption(f"작성자: {post['author']} | {post['created_at'][:16]} | 탭: {post['tab_name']}")
+            with col_like:
+                if st.button(f"👍 {post['likes']}", key="like_btn"):
+                    new_count = toggle_like(post["id"], st.session_state["board_session_id"])
+                    st.rerun()
+
+            # 차트 이미지
+            img_full = os.path.join(os.path.dirname(__file__), post["image_path"])
+            if os.path.exists(img_full):
+                st.image(img_full, use_container_width=True)
+            else:
+                st.warning("이미지 파일을 찾을 수 없습니다.")
+
+            if post["description"]:
+                st.markdown(post["description"])
+
+            # 사용된 설정
+            with st.expander("사용된 설정 보기"):
+                settings = json.loads(post["settings_json"])
+                if "global" in settings:
+                    st.markdown("**글로벌 필터**")
+                    for k, v in settings["global"].items():
+                        st.text(f"  {k}: {v}")
+                if "tab" in settings:
+                    st.markdown(f"**탭 설정 ({settings['tab'].get('name', '')})**")
+                    for k, v in settings["tab"].items():
+                        if k != "name":
+                            st.text(f"  {k}: {v}")
+
+            # 댓글 섹션
+            st.divider()
+            st.markdown("**댓글**")
+            comments = get_comments(post["id"])
+            for c in comments:
+                st.markdown(f"**{c['author']}** ({c['created_at'][:16]})")
+                st.text(c["content"])
+                st.markdown("---")
+
+            with st.form(key=f"comment_form_{post['id']}"):
+                c_author = st.text_input("닉네임", key="cmt_author")
+                c_content = st.text_area("댓글 내용", key="cmt_content", height=80)
+                if st.form_submit_button("댓글 등록"):
+                    if c_author and c_content:
+                        add_comment(post["id"], c_author, c_content)
+                        st.rerun()
+                    else:
+                        st.warning("닉네임과 내용을 모두 입력하세요.")
+
+            # 삭제
+            st.divider()
+            with st.expander("게시글 삭제"):
+                del_pw = st.text_input("비밀번호 확인", type="password", key="del_pw")
+                if st.button("삭제", key="del_btn"):
+                    if del_pw:
+                        if delete_post(post["id"], del_pw):
+                            st.success("삭제되었습니다.")
+                            st.session_state["board_view"] = ("gallery",)
+                            st.rerun()
+                        else:
+                            st.error("비밀번호가 일치하지 않습니다.")
+    else:
+        # --- 갤러리 뷰 ---
+        total = get_post_count()
+        page = st.session_state["board_page"]
+        per_page = 12
+        posts = get_posts(page=page, per_page=per_page)
+
+        if not posts:
+            st.info("아직 게시글이 없습니다. 사이드바에서 차트를 저장해보세요!")
+        else:
+            cols = st.columns(4)
+            for i, post in enumerate(posts):
+                with cols[i % 4]:
+                    img_path = os.path.join(os.path.dirname(__file__), post["image_path"])
+                    if os.path.exists(img_path):
+                        st.image(img_path, use_container_width=True)
+                    else:
+                        st.markdown("*(이미지 없음)*")
+                    st.markdown(f"**{post['title']}**")
+                    st.caption(f"{post['author']} | 👍 {post['likes']} | {post['created_at'][:10]}")
+                    if st.button("상세보기", key=f"view_{post['id']}"):
+                        st.session_state["board_view"] = ("detail", post["id"])
+                        st.rerun()
+
+            # 페이지네이션
+            total_pages = max(1, math.ceil(total / per_page))
+            nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+            with nav_col1:
+                if page > 1 and st.button("← 이전"):
+                    st.session_state["board_page"] = page - 1
+                    st.rerun()
+            with nav_col2:
+                st.markdown(f"<center>{page} / {total_pages}</center>", unsafe_allow_html=True)
+            with nav_col3:
+                if page < total_pages and st.button("다음 →"):
+                    st.session_state["board_page"] = page + 1
+                    st.rerun()
+
+
+# --- 게시판 저장 위젯 (사이드바) ---
+with st.sidebar:
+    st.divider()
+    st.subheader("📌 게시판에 저장")
+    board_figs = st.session_state.get("_board_figures", {})
+    if board_figs:
+        fig_options = list(board_figs.keys())
+        save_chart = st.selectbox(
+            "저장할 차트",
+            options=fig_options,
+            format_func=lambda k: f"[{board_figs[k]['tab_name']}] {k}",
+            key="board_sel_chart",
+        )
+        save_title = st.text_input("제목", key="board_save_title")
+        save_desc = st.text_area("설명 (선택)", key="board_save_desc", height=80)
+        save_author = st.text_input("닉네임", key="board_save_author")
+        save_pw = st.text_input("비밀번호", type="password", key="board_save_pw",
+                                help="수정/삭제 시 필요")
+        if st.button("게시판에 저장", key="board_save_btn", type="primary"):
+            if save_title and save_author and save_pw:
+                from board import create_post, capture_current_settings
+                entry = board_figs[save_chart]
+                settings = capture_current_settings()
+                post_id = create_post(
+                    title=save_title, description=save_desc,
+                    author=save_author, password=save_pw,
+                    tab_name=entry["tab_name"], fig=entry["fig"],
+                    settings=settings,
+                )
+                st.success(f"저장 완료! (#{post_id})")
+            else:
+                st.warning("제목, 닉네임, 비밀번호를 모두 입력하세요.")
+    else:
+        st.info("차트가 표시되면 저장할 수 있습니다.")
