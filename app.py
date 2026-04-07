@@ -604,6 +604,7 @@ with sub_price_cmp:
                 labels={pc_var: "가격(만원)", pc_time_col: "기간"},
                 markers=True,
             )
+            register_fig("가격비교_라인", fig_pc, "시장분석")
             st.plotly_chart(fig_pc, use_container_width=True)
 
             # 최근 연도 막대 비교
