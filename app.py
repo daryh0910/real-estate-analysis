@@ -1317,6 +1317,7 @@ with main_tab5:
                 color=unsold_var, color_continuous_scale="Reds",
                 title=f"{unsold_latest_yr}년 시도별 {unsold_var}",
             )
+            register_fig("미분양_바", fig_unsold_bar, "공급분석")
             st.plotly_chart(fig_unsold_bar, use_container_width=True)
         else:
             st.info("미분양 데이터를 업데이트하면 이 탭에서 확인할 수 있습니다.")
