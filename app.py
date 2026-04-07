@@ -1305,6 +1305,7 @@ with main_tab5:
                 labels={unsold_time_col: "기간"},
                 markers=True,
             )
+            register_fig("미분양_추이", fig_unsold, "공급분석")
             st.plotly_chart(fig_unsold, use_container_width=True)
 
             # 최근 연도 시도별 막대 비교
