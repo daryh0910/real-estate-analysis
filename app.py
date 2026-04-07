@@ -388,6 +388,7 @@ with main_tab1:
                 title=f"{mode_label} 평균 가격 추이",
                 labels={_price_col: "가격(만원)", time_col: "기간"},
             )
+            register_fig("매매가격_추이", fig_price, "Overview")
             st.plotly_chart(fig_price, use_container_width=True)
 
         if not chart_df.empty and _vol_col in chart_df.columns:
