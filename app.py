@@ -616,6 +616,7 @@ with sub_price_cmp:
                 color=pc_var, color_continuous_scale="Blues",
                 title=f"{latest_yr}년 시도별 {pc_var}",
             )
+            register_fig("가격비교_바", fig_pc_bar, "시장분석")
             st.plotly_chart(fig_pc_bar, use_container_width=True)
         else:
             st.info("비교할 수 있는 가격 데이터가 없습니다.")
