@@ -1497,6 +1497,7 @@ with sub_corr:
                 title=f"연도별 {x_var}-{y_var} 상관계수 추이", markers=True,
             )
             fig_period.add_hline(y=0, line_dash="dash", line_color="gray")
+            register_fig("연도별_상관계수", fig_period, "통계분석")
             st.plotly_chart(fig_period, use_container_width=True)
 
 
