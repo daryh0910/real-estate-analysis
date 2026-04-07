@@ -747,6 +747,7 @@ with region_sub1:
                     x="연도", y=price_col, color="시도",
                     title=f"시도별 {mode_label} 평균 가격 추이",
                 )
+                register_fig("지역비교_바", fig_compare, "지역별 분석")
                 st.plotly_chart(fig_compare, use_container_width=True)
 
 # ── 요약통계 서브탭 ─────────────────────────────────────────────────
