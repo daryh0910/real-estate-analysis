@@ -543,6 +543,7 @@ with sub_ts:
                         annotation_textangle=-45,
                     )
 
+            register_fig("시계열_듀얼축", fig_dual, "시장분석")
             st.plotly_chart(fig_dual, use_container_width=True)
 
             # 상관계수 표시
