@@ -479,6 +479,7 @@ with main_tab1:
                     x=ts_time_col, y=var, color="시도",
                     title=f"{var} 추이",
                 )
+                register_fig("정책이벤트_차트", fig, "Overview")
                 st.plotly_chart(fig, use_container_width=True)
 
 
