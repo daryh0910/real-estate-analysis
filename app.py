@@ -1168,6 +1168,7 @@ with main_tab4:
                     markers=True,
                     labels={time_col_5: "기간"},
                 )
+                register_fig("수식_통합차트", fig_combined, "수요-공급 분석기")
                 st.plotly_chart(fig_combined, use_container_width=True, key="calc5_combined")
             else:
                 st.info("계산 결과가 없습니다.")
