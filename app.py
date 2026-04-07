@@ -1472,6 +1472,7 @@ with sub_corr:
                     xref="paper", yref="paper",
                     x=0.02, y=0.98, showarrow=False, font=dict(size=14),
                 )
+            register_fig("상관_산점도", fig_scatter, "통계분석")
             st.plotly_chart(fig_scatter, use_container_width=True)
 
         # 시도별 상관계수
