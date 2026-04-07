@@ -1484,6 +1484,7 @@ with sub_corr:
                 color="상관계수", color_continuous_scale="RdBu_r", range_color=[-1, 1],
                 title=f"시도별 {x_var}-{y_var} 상관계수",
             )
+            register_fig("시도별_상관계수", fig_bar, "통계분석")
             st.plotly_chart(fig_bar, use_container_width=True)
             st.dataframe(region_corr)
 
