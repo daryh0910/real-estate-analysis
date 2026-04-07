@@ -4,11 +4,15 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import os
+import json
+import math
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from data_loader import load_all_data, load_apt_data, load_rent_data, get_sigungu_name
+from board import init_db
 from analysis import (
     correlation_matrix,
     correlation_by_region,
