@@ -1539,6 +1539,7 @@ with sub_cluster:
                     labels={"color": "클러스터"},
                 )
                 fig_cluster.update_traces(textposition="top center")
+                register_fig("클러스터링", fig_cluster, "고급분석")
                 st.plotly_chart(fig_cluster, use_container_width=True)
 
                 # 클러스터 중심값
