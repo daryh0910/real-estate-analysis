@@ -1619,6 +1619,7 @@ with sub_granger:
                         title=f"Granger 인과성 p값 ({g_x} → {g_y})",
                         labels={"color": "p값"},
                     )
+                    register_fig("Granger_히트맵", fig_g, "고급분석")
                     st.plotly_chart(fig_g, use_container_width=True)
 
                     # 상세 테이블
