@@ -733,6 +733,7 @@ with region_sub1:
                     x=time_col, y=trend_price, color="시군구명",
                     title=f"시군구별 {mode_label} 평균 가격 추이",
                 )
+                register_fig("지역비교_라인", fig_compare, "지역별 분석")
                 st.plotly_chart(fig_compare, use_container_width=True)
         else:
             st.subheader(f"시도별 {mode_label} 가격 추이 비교")
