@@ -306,8 +306,8 @@ def _compute_formulas(
 
 
 # --- 페이지 구성 ---
-main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6, main_tab7 = st.tabs([
-    "Overview", "시장분석", "지역별 분석", "수요-공급 분석기", "공급분석", "통계분석", "고급분석"
+main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6, main_tab7, main_tab8 = st.tabs([
+    "Overview", "시장분석", "지역별 분석", "수요-공급 분석기", "공급분석", "통계분석", "고급분석", "커뮤니티 게시판"
 ])
 
 # ============================
