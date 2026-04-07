@@ -30,6 +30,13 @@ st.set_page_config(
     layout="wide",
 )
 
+
+def register_fig(name: str, fig, tab_name: str):
+    """Plotly figure를 게시판 저장용으로 등록"""
+    if "_board_figures" not in st.session_state:
+        st.session_state["_board_figures"] = {}
+    st.session_state["_board_figures"][name] = {"fig": fig, "tab_name": tab_name}
+
 # --- 데이터 로딩 (캐싱) ---
 @st.cache_data(show_spinner=False)
 def get_data():
