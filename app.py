@@ -712,6 +712,7 @@ with region_sub1:
                 color=compare_var,
                 title=f"{latest_year}년 시군구별 {compare_var} (상위 30개)",
             )
+            register_fig("지역순위", fig_region, "지역별 분석")
             st.plotly_chart(fig_region, use_container_width=True)
 
         # 시군구별 가격 추이 비교
