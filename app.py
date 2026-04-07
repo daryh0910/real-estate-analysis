@@ -578,6 +578,7 @@ with sub_ts:
                     melted, x=time_col, y="정규화값", color="변수",
                     title=f"{sido_for_ts}: 정규화 시계열 비교 (0-1 스케일)",
                 )
+                register_fig("정규화_비교", fig_norm, "시장분석")
                 st.plotly_chart(fig_norm, use_container_width=True)
 
 # ── 가격비교 서브탭 ─────────────────────────────────────────────────
