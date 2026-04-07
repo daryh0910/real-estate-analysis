@@ -1283,6 +1283,7 @@ with main_tab5:
                     labels={sup_time_col: "기간", "호수": "호수(호)"},
                     markers=True,
                 )
+                register_fig("공급_파이프라인", fig_supply, "공급분석")
                 st.plotly_chart(fig_supply, use_container_width=True)
             else:
                 st.info("선택한 시도의 착공/준공 데이터가 없습니다.")
