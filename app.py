@@ -465,6 +465,7 @@ with main_tab1:
                     ))
                     fig_gauge_csi.update_layout(height=300)
                     with g_col2:
+                        register_fig("CSI_게이지", fig_gauge_csi, "Overview")
                         st.plotly_chart(fig_gauge_csi, use_container_width=True)
 
         # 원인 지표 트렌드 (시도 레벨)
