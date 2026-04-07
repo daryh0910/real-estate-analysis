@@ -1406,6 +1406,7 @@ with sub_outlier:
                 hover_data=["시도", "z_score"],
                 title=f"{outlier_var} 이상치 분포",
             )
+            register_fig("이상치_산점도", fig_outlier, "통계분석")
             st.plotly_chart(fig_outlier, use_container_width=True)
 
             # 이상치 상세 테이블
