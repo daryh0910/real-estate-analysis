@@ -398,6 +398,7 @@ with main_tab1:
                 title=f"{mode_label} 거래량 추이",
                 labels={_vol_col: "거래건수", time_col: "기간"},
             )
+            register_fig("거래량_추이", fig_vol, "Overview")
             st.plotly_chart(fig_vol, use_container_width=True)
 
         # ── 시장심리 게이지 (KB 매수우위지수, 주택가격전망CSI) ──────
