@@ -811,6 +811,7 @@ with region_sub3:
                 title=f"{mig_sido}: 인구이동 현황",
                 labels={mig_time_col: "기간", "인원수": "인원(명)"},
             )
+            register_fig("인구이동", fig_mig, "지역별 분석")
             st.plotly_chart(fig_mig, use_container_width=True)
         else:
             st.info("선택한 시도의 인구이동 데이터가 없습니다.")
