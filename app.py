@@ -2017,6 +2017,15 @@ with main_tab8:
             with st.expander("전체 급지 테이블"):
                 _gd_disp = [c for c in ["급지순위", "시군구명", "시도", "급지스코어", "평균단가", "소득수준", "거래량", "성장률_3yr"] if c in _grade_df.columns]
                 st.dataframe(_grade_df[_gd_disp], use_container_width=True, height=400)
+                # CSV 다운로드 버튼
+                _csv_grade = _grade_df[_gd_disp].to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    label="📥 급지순위 CSV 다운로드",
+                    data=_csv_grade,
+                    file_name=f"sigungu_grade_{_match_year}.csv",
+                    mime="text/csv",
+                    key="dl_grade",
+                )
     except Exception as e:
         st.error(f"급지순위 계산 오류: {e}")
 
