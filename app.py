@@ -28,6 +28,13 @@ from analysis import (
     compute_purchasing_power,
     rank_sigungu_grade,
     match_income_to_property,
+    forecast_price,
+    HAS_PROPHET,
+)
+from tax_calculator import (
+    calc_acquisition_tax,
+    calc_capital_gains_tax,
+    calc_investment_return,
 )
 
 st.set_page_config(
