@@ -5,6 +5,13 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 
+# PCHIP 보간용
+try:
+    from scipy.interpolate import PchipInterpolator
+    HAS_SCIPY_INTERP = True
+except ImportError:
+    HAS_SCIPY_INTERP = False
+
 # 다중회귀/Granger 인과검정용
 try:
     import statsmodels.api as sm
