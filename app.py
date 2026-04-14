@@ -466,7 +466,7 @@ with main_tab1:
     st.divider()
 
     # ──────────────────────────────────────────────────
-    # Zone B: 저평가 / 고평가 TOP 10
+    # Zone B: 저평가 / 고평가 TOP 10  +  Choropleth 지도
     # ──────────────────────────────────────────────────
     st.subheader("저평가·고평가 지역 순위")
     try:
@@ -476,6 +476,48 @@ with main_tab1:
         if _value_df.empty:
             st.warning("밸류스코어를 계산할 데이터가 부족합니다. (apt/jeonse/nps 데이터 확인 필요)")
         else:
+            # ── Choropleth 지도 (막대 차트 위에 배치) ──────────────
+            try:
+                _geo_path = os.path.join(os.path.dirname(__file__), "geo_data", "sigungu.geojson")
+                if os.path.exists(_geo_path):
+                    with open(_geo_path, encoding="utf-8") as _gf:
+                        _geojson = json.load(_gf)
+
+                    # 지역코드를 문자열 5자리로 정규화
+                    _map_df = _value_df.copy()
+                    _map_df["지역코드"] = _map_df["지역코드"].astype(str).str.zfill(5)
+
+                    # hover에 표시할 컬럼 선택 (없으면 제외)
+                    _hover_cols = [c for c in ["시군구명", "시도", "전세가율", "PIR_NPS"] if c in _map_df.columns]
+
+                    fig_map = px.choropleth_mapbox(
+                        _map_df,
+                        geojson=_geojson,
+                        locations="지역코드",
+                        featureidkey="properties.SIG_CD",
+                        color="밸류스코어",
+                        color_continuous_scale=["#e74c3c", "#f1c40f", "#2ecc71"],  # 빨강→노랑→초록
+                        range_color=[_map_df["밸류스코어"].quantile(0.05), _map_df["밸류스코어"].quantile(0.95)],
+                        mapbox_style="carto-positron",
+                        center={"lat": 36.5, "lon": 127.8},
+                        zoom=6,
+                        hover_data=_hover_cols,
+                        labels={"밸류스코어": "밸류스코어"},
+                        title=f"시군구 밸류스코어 지도 ({_vs_year}년)  ●초록=저평가  ●빨강=고평가",
+                    )
+                    fig_map.update_layout(
+                        height=500,
+                        margin=dict(t=40, b=10, l=10, r=10),
+                        coloraxis_colorbar=dict(title="밸류스코어", thickness=14),
+                    )
+                    register_fig("밸류스코어_지도", fig_map, "Overview")
+                    st.plotly_chart(fig_map, use_container_width=True)
+                else:
+                    st.info("geo_data/sigungu.geojson 파일이 없어 지도를 표시할 수 없습니다.")
+            except Exception as _map_e:
+                st.warning(f"지도 렌더링 오류: {_map_e}")
+
+            # ── 저평가/고평가 막대 차트 ─────────────────────────────
             _b_left, _b_right = st.columns(2)
 
             # 저평가 TOP 10 (밸류스코어 상위 = 상대적으로 저평가)
@@ -538,13 +580,22 @@ with main_tab1:
                 register_fig("고평가_TOP10", fig_over, "Overview")
                 st.plotly_chart(fig_over, use_container_width=True)
 
-            # 상세 데이터 expander
+            # 상세 데이터 expander + CSV 다운로드
             with st.expander("상세 데이터 (전체 밸류스코어 테이블)"):
                 _disp_cols = [c for c in ["시군구명", "시도", "밸류스코어", "전세가율", "PIR_NPS", "거래회전율_proxy", "가격모멘텀"] if c in _value_df.columns]
                 st.dataframe(
                     _value_df[_disp_cols].sort_values("밸류스코어", ascending=False),
                     use_container_width=True,
                     height=350,
+                )
+                # CSV 다운로드 버튼
+                _csv_value = _value_df[_disp_cols].sort_values("밸류스코어", ascending=False).to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    label="📥 밸류스코어 CSV 다운로드",
+                    data=_csv_value,
+                    file_name=f"value_score_{_vs_year}.csv",
+                    mime="text/csv",
+                    key="dl_value_score",
                 )
     except Exception as e:
         st.error(f"밸류스코어 계산 오류: {e}")
