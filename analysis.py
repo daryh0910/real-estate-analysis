@@ -12,6 +12,13 @@ try:
 except ImportError:
     HAS_SCIPY_INTERP = False
 
+# Prophet 시계열 예측용
+try:
+    from prophet import Prophet
+    HAS_PROPHET = True
+except ImportError:
+    HAS_PROPHET = False
+
 # 다중회귀/Granger 인과검정용
 try:
     import statsmodels.api as sm
