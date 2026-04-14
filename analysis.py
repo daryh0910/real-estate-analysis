@@ -860,6 +860,153 @@ def rank_sigungu_grade(apt_df, nps_df, nts_df=None, year=None):
     return agg[[c for c in result_cols if c in agg.columns]].reset_index(drop=True)
 
 
+# ── Prophet 가격 예측 ─────────────────────────────────────────────────────
+
+def forecast_price(df, sido, periods=12, freq="MS", price_col="평균가격"):
+    """
+    Prophet으로 시도별 아파트 평균가격 예측
+
+    Args:
+        df: 매매/임대 실거래 DataFrame (시도, 연도, 월, 평균가격 포함)
+        sido: 예측할 시도명
+        periods: 예측 기간 (개월)
+        freq: 시계열 빈도 ("MS" = month start)
+        price_col: 가격 컬럼명 (기본: "평균가격")
+
+    Returns:
+        dict {
+            "forecast": DataFrame [ds, yhat, yhat_lower, yhat_upper],
+            "forecast_future": 미래 기간만 추출한 DataFrame,
+            "actual": DataFrame [ds, y],
+            "holdout_actual": 검증용 holdout DataFrame,
+            "holdout_pred": holdout 예측값 DataFrame,
+            "metrics": dict {mae, mape, rmse},
+            "components": dict {trend, yearly},
+            "error": str (에러 발생 시)
+        }
+    """
+    if not HAS_PROPHET:
+        return {"error": "Prophet이 설치되지 않았습니다. pip install prophet으로 설치하세요."}
+
+    # 시도 필터링
+    sido_df = df[df["시도"] == sido].copy() if "시도" in df.columns else df.copy()
+
+    if sido_df.empty:
+        return {"error": f"'{sido}' 데이터가 없습니다."}
+
+    # 월별 집계를 위한 날짜 컬럼 생성
+    if "연도" in sido_df.columns and "월" in sido_df.columns:
+        sido_df["_year"] = sido_df["연도"].astype(int)
+        sido_df["_month"] = sido_df["월"].astype(int)
+        sido_df["ds"] = pd.to_datetime(
+            sido_df["_year"].astype(str) + "-" + sido_df["_month"].astype(str).str.zfill(2) + "-01"
+        )
+    elif "연월" in sido_df.columns:
+        # 연월 컬럼이 YYYYMM 형식인 경우
+        sido_df["ds"] = pd.to_datetime(sido_df["연월"].astype(str), format="%Y%m", errors="coerce")
+    else:
+        return {"error": "월별 날짜 정보(연도+월 또는 연월)가 없습니다."}
+
+    # 월별 평균가격 집계
+    if price_col not in sido_df.columns:
+        return {"error": f"가격 컬럼 '{price_col}'이 없습니다."}
+
+    ts = (
+        sido_df.groupby("ds")[price_col]
+        .mean()
+        .reset_index()
+        .rename(columns={price_col: "y"})
+        .dropna()
+        .sort_values("ds")
+    )
+
+    if len(ts) < 24:
+        return {"error": f"데이터가 부족합니다. (현재 {len(ts)}개월, 최소 24개월 필요)"}
+
+    # holdout: 최근 12개월을 검증용으로 분리 (전체의 1/4 또는 12개월 중 작은 값)
+    holdout_n = min(12, len(ts) // 4)
+    train_ts = ts.iloc[:-holdout_n].copy()
+    holdout_ts = ts.iloc[-holdout_n:].copy()
+
+    # 1) holdout 검증용 모델 학습
+    try:
+        model_holdout = Prophet(
+            yearly_seasonality=True,
+            weekly_seasonality=False,
+            daily_seasonality=False,
+            changepoint_prior_scale=0.05,
+            seasonality_prior_scale=10,
+        )
+        model_holdout.fit(train_ts)
+
+        # holdout 기간 예측 (future에 holdout 날짜 포함)
+        future_holdout = model_holdout.make_future_dataframe(periods=holdout_n, freq=freq)
+        forecast_holdout_all = model_holdout.predict(future_holdout)
+
+        # holdout 구간만 추출
+        holdout_pred = forecast_holdout_all[
+            forecast_holdout_all["ds"].isin(holdout_ts["ds"])
+        ][["ds", "yhat"]].copy()
+
+        # 성능 지표 계산
+        merged_holdout = holdout_ts.merge(holdout_pred, on="ds", how="inner")
+        metrics = {}
+        if not merged_holdout.empty:
+            actual_vals = merged_holdout["y"].values
+            pred_vals = merged_holdout["yhat"].values
+            mae = float(np.mean(np.abs(actual_vals - pred_vals)))
+            rmse = float(np.sqrt(np.mean((actual_vals - pred_vals) ** 2)))
+            nonzero_mask = actual_vals != 0
+            if nonzero_mask.any():
+                mape = float(
+                    np.mean(np.abs((actual_vals[nonzero_mask] - pred_vals[nonzero_mask]) / actual_vals[nonzero_mask])) * 100
+                )
+            else:
+                mape = np.nan
+            metrics = {"mae": round(mae, 1), "mape": round(mape, 2), "rmse": round(rmse, 1)}
+
+        # 2) 전체 데이터로 재학습 후 미래 예측
+        model_full = Prophet(
+            yearly_seasonality=True,
+            weekly_seasonality=False,
+            daily_seasonality=False,
+            changepoint_prior_scale=0.05,
+            seasonality_prior_scale=10,
+        )
+        model_full.fit(ts)
+        future_full = model_full.make_future_dataframe(periods=periods, freq=freq)
+        forecast_full = model_full.predict(future_full)
+
+        # 미래 기간만 추출 (마지막 actual 날짜 이후)
+        last_actual_date = ts["ds"].max()
+        forecast_future = forecast_full[forecast_full["ds"] > last_actual_date][
+            ["ds", "yhat", "yhat_lower", "yhat_upper"]
+        ].copy()
+
+        # 전체 예측 DataFrame (actual 구간 포함 — 차트용)
+        forecast_df = forecast_full[["ds", "yhat", "yhat_lower", "yhat_upper"]].copy()
+
+        # 계절성 컴포넌트 추출
+        components = {}
+        if "trend" in forecast_full.columns:
+            components["trend"] = forecast_full[["ds", "trend"]].copy()
+        if "yearly" in forecast_full.columns:
+            components["yearly"] = forecast_full[["ds", "yearly"]].copy()
+
+        return {
+            "forecast": forecast_df,
+            "forecast_future": forecast_future,
+            "actual": ts,
+            "holdout_actual": holdout_ts,
+            "holdout_pred": holdout_pred,
+            "metrics": metrics,
+            "components": components,
+        }
+
+    except Exception as e:
+        return {"error": f"Prophet 예측 오류: {str(e)}"}
+
+
 # ── 소득 퍼센타일 → 시군구 급지 매칭 ─────────────────────────────────────
 
 def match_income_to_property(purchasing_power_df, grade_df):
