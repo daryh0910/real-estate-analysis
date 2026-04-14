@@ -1903,6 +1903,487 @@ with sub_granger:
 
 
 # ============================
+# Tab 8: 가격 예측 (Prophet)
+# ============================
+with main_tab8:
+    st.header("AI 가격 예측 (Prophet)")
+    st.caption("시계열 분해 + 계절성 모델로 시도별 아파트 가격을 예측합니다.")
+
+    if not HAS_PROPHET:
+        st.warning("Prophet이 설치되지 않았습니다. `pip install prophet`으로 설치하세요.")
+        st.info("requirements.txt에 prophet이 추가되어 있으니, 가상환경에서 `pip install -r requirements.txt`를 실행하세요.")
+        st.stop()
+
+    # ── 파라미터 입력 ───────────────────────────────────────────────────────
+    _fc_c1, _fc_c2, _fc_c3 = st.columns(3)
+    with _fc_c1:
+        _fc_sido_options = sorted(apt_df["시도"].dropna().unique()) if "시도" in apt_df.columns else []
+        _fc_sido = st.selectbox(
+            "예측 시도",
+            _fc_sido_options,
+            index=_fc_sido_options.index("서울") if "서울" in _fc_sido_options else 0,
+            key="fc_sido",
+        )
+    with _fc_c2:
+        _fc_periods = st.select_slider(
+            "예측 기간 (개월)",
+            options=[6, 12, 18, 24],
+            value=12,
+            key="fc_periods",
+        )
+    with _fc_c3:
+        _fc_mode = st.radio(
+            "분석 모드",
+            ["매매", "전세"],
+            horizontal=True,
+            key="fc_mode",
+        )
+
+    st.divider()
+
+    # ── 데이터 소스 선택 ────────────────────────────────────────────────────
+    if _fc_mode == "매매":
+        _fc_src_df = apt_df.copy()
+        _fc_price_col = "평균가격"
+        _fc_unit = "만원"
+    else:
+        _fc_src_df = jeonse_df.copy() if not jeonse_df.empty else apt_df.copy()
+        _fc_price_col = "보증금평균" if "보증금평균" in (_fc_src_df.columns if not jeonse_df.empty else []) else "평균가격"
+        _fc_unit = "만원 (보증금)"
+
+    # ── 예측 실행 ────────────────────────────────────────────────────────────
+    with st.spinner(f"{_fc_sido} {_fc_mode} 가격 예측 중..."):
+        _fc_result = forecast_price(
+            df=_fc_src_df,
+            sido=_fc_sido,
+            periods=_fc_periods,
+            price_col=_fc_price_col,
+        )
+
+    if "error" in _fc_result:
+        st.error(_fc_result["error"])
+    else:
+        _fc_actual = _fc_result["actual"]
+        _fc_forecast = _fc_result["forecast"]
+        _fc_forecast_future = _fc_result.get("forecast_future", pd.DataFrame())
+        _fc_metrics = _fc_result.get("metrics", {})
+        _fc_components = _fc_result.get("components", {})
+        _fc_holdout_actual = _fc_result.get("holdout_actual", pd.DataFrame())
+        _fc_holdout_pred = _fc_result.get("holdout_pred", pd.DataFrame())
+
+        # ── 결과 1: 예측 정확도 지표 ───────────────────────────────────────
+        if _fc_metrics:
+            _m1, _m2, _m3 = st.columns(3)
+            with _m1:
+                st.metric("MAE (평균절대오차)", f"{_fc_metrics.get('mae', 'N/A'):,.0f} 만원")
+            with _m2:
+                st.metric("MAPE (평균절대백분율오차)", f"{_fc_metrics.get('mape', 'N/A'):.1f} %")
+            with _m3:
+                st.metric("RMSE (평균제곱근오차)", f"{_fc_metrics.get('rmse', 'N/A'):,.0f} 만원")
+            st.caption("※ holdout 검증: 가장 최근 데이터로 예측 정확도를 측정합니다.")
+
+        st.divider()
+
+        # ── 결과 2: 예측 차트 ───────────────────────────────────────────────
+        st.subheader(f"{_fc_sido} {_fc_mode} 가격 추이 및 예측")
+
+        _fc_fig = go.Figure()
+
+        # 실제값 (전체)
+        _fc_fig.add_trace(go.Scatter(
+            x=_fc_actual["ds"],
+            y=_fc_actual["y"],
+            mode="lines",
+            name="실제값",
+            line=dict(color="#2196F3", width=2),
+        ))
+
+        # 모델 피팅값 (actual 구간)
+        _fc_fitted = _fc_forecast[_fc_forecast["ds"].isin(_fc_actual["ds"])]
+        _fc_fig.add_trace(go.Scatter(
+            x=_fc_fitted["ds"],
+            y=_fc_fitted["yhat"],
+            mode="lines",
+            name="모델 피팅",
+            line=dict(color="#FF9800", width=1.5, dash="dot"),
+            opacity=0.7,
+        ))
+
+        # 미래 예측값 + 신뢰구간
+        if not _fc_forecast_future.empty:
+            # 신뢰구간 음영 (upper → lower fill)
+            _fc_fig.add_trace(go.Scatter(
+                x=pd.concat([_fc_forecast_future["ds"], _fc_forecast_future["ds"].iloc[::-1]]),
+                y=pd.concat([_fc_forecast_future["yhat_upper"], _fc_forecast_future["yhat_lower"].iloc[::-1]]),
+                fill="toself",
+                fillcolor="rgba(244, 67, 54, 0.15)",
+                line=dict(color="rgba(255,255,255,0)"),
+                hoverinfo="skip",
+                showlegend=True,
+                name="예측 신뢰구간",
+            ))
+            _fc_fig.add_trace(go.Scatter(
+                x=_fc_forecast_future["ds"],
+                y=_fc_forecast_future["yhat"],
+                mode="lines+markers",
+                name="예측값",
+                line=dict(color="#F44336", width=2, dash="dash"),
+                marker=dict(size=5),
+            ))
+
+        # 예측 시작점 수직선
+        _last_date = _fc_actual["ds"].max()
+        _fc_fig.add_vline(
+            x=_last_date,
+            line_dash="dash",
+            line_color="gray",
+            annotation_text="예측 시작",
+            annotation_position="top right",
+        )
+
+        _fc_fig.update_layout(
+            xaxis_title="날짜",
+            yaxis_title=f"가격 ({_fc_unit})",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode="x unified",
+            height=450,
+        )
+        _fc_fig.update_yaxes(tickformat=",")
+        st.plotly_chart(_fc_fig, use_container_width=True)
+
+        # ── 결과 3: 미래 예측 테이블 ────────────────────────────────────────
+        if not _fc_forecast_future.empty:
+            with st.expander("미래 예측 수치 보기"):
+                _fc_tbl = _fc_forecast_future.copy()
+                _fc_tbl["ds"] = _fc_tbl["ds"].dt.strftime("%Y-%m")
+                _fc_tbl.columns = ["연월", "예측가격(만원)", "하한(만원)", "상한(만원)"]
+                _fc_tbl = _fc_tbl.set_index("연월")
+                st.dataframe(
+                    _fc_tbl.style.format("{:,.0f}"),
+                    use_container_width=True,
+                    height=300,
+                )
+
+        st.divider()
+
+        # ── 결과 4: 트렌드 / 계절성 분해 ────────────────────────────────────
+        st.subheader("트렌드 및 계절성 분해")
+        _comp_c1, _comp_c2 = st.columns(2)
+
+        with _comp_c1:
+            if "trend" in _fc_components:
+                _trend_df = _fc_components["trend"]
+                _trend_fig = go.Figure()
+                _trend_fig.add_trace(go.Scatter(
+                    x=_trend_df["ds"],
+                    y=_trend_df["trend"],
+                    mode="lines",
+                    line=dict(color="#4CAF50", width=2),
+                    name="장기 추세",
+                ))
+                _trend_fig.update_layout(
+                    title="장기 추세 (Trend)",
+                    xaxis_title="날짜",
+                    yaxis_title=f"가격 ({_fc_unit})",
+                    height=300,
+                )
+                _trend_fig.update_yaxes(tickformat=",")
+                st.plotly_chart(_trend_fig, use_container_width=True)
+            else:
+                st.info("추세 데이터를 추출할 수 없습니다.")
+
+        with _comp_c2:
+            if "yearly" in _fc_components:
+                _season_df = _fc_components["yearly"].copy()
+                # 월별 평균 계절성 집계
+                _season_df["월"] = _season_df["ds"].dt.month
+                _season_monthly = _season_df.groupby("월")["yearly"].mean().reset_index()
+                _month_names = ["1월", "2월", "3월", "4월", "5월", "6월",
+                                "7월", "8월", "9월", "10월", "11월", "12월"]
+                _season_monthly["월_이름"] = _season_monthly["월"].apply(lambda x: _month_names[x - 1])
+
+                _season_fig = go.Figure()
+                _season_fig.add_trace(go.Bar(
+                    x=_season_monthly["월_이름"],
+                    y=_season_monthly["yearly"],
+                    marker_color=["#F44336" if v >= 0 else "#2196F3" for v in _season_monthly["yearly"]],
+                    name="월별 계절 효과",
+                ))
+                _season_fig.update_layout(
+                    title="연간 계절성 패턴 (월별 가격 편차)",
+                    xaxis_title="월",
+                    yaxis_title=f"계절 효과 ({_fc_unit})",
+                    height=300,
+                )
+                _season_fig.update_yaxes(tickformat=",")
+                st.plotly_chart(_season_fig, use_container_width=True)
+                st.caption("※ 양수(빨강)=해당 월에 가격이 평균보다 높은 경향, 음수(파랑)=낮은 경향")
+            else:
+                st.info("계절성 데이터를 추출할 수 없습니다.")
+
+        # ── holdout 검증 상세 ────────────────────────────────────────────────
+        if not _fc_holdout_actual.empty and not _fc_holdout_pred.empty:
+            with st.expander("검증 기간 실제 vs 예측 비교"):
+                _hv_merged = _fc_holdout_actual.merge(_fc_holdout_pred, on="ds", how="inner")
+                _hv_merged["오차(만원)"] = (_hv_merged["yhat"] - _hv_merged["y"]).round(0)
+                _hv_merged["오차율(%)"] = ((_hv_merged["yhat"] - _hv_merged["y"]) / _hv_merged["y"] * 100).round(2)
+                _hv_merged["ds"] = _hv_merged["ds"].dt.strftime("%Y-%m")
+                _hv_merged = _hv_merged.rename(columns={"ds": "연월", "y": "실제(만원)", "yhat": "예측(만원)"})
+                st.dataframe(
+                    _hv_merged[["연월", "실제(만원)", "예측(만원)", "오차(만원)", "오차율(%)"]].style.format({
+                        "실제(만원)": "{:,.0f}", "예측(만원)": "{:,.0f}", "오차(만원)": "{:,.0f}", "오차율(%)": "{:.2f}"
+                    }),
+                    use_container_width=True,
+                    height=280,
+                )
+
+
+# ============================
+# Tab 9: 투자 계산기
+# ============================
+with main_tab9:
+    st.header("투자 수익률 & 세금 계산기")
+    st.caption("취득세·양도세·이자비용을 자동 계산하고, 레버리지 포함 투자 수익률을 산출합니다. (2026년 세율 기준)")
+
+    # ── 입력 영역 ────────────────────────────────────────────────────────────
+    _tc_left, _tc_right = st.columns([1, 1])
+
+    with _tc_left:
+        st.subheader("매수/매도 정보")
+        _tc_buy = st.number_input("매수가 (만원)", min_value=0, value=50000, step=1000, key="tc_buy",
+                                   help="아파트 매수 금액 (만원)")
+        _tc_sell = st.number_input("매도가 (만원)", min_value=0, value=60000, step=1000, key="tc_sell",
+                                    help="예상 매도 금액 (만원)")
+        _tc_area = st.number_input("전용면적 (m²)", min_value=1.0, value=84.0, step=1.0, key="tc_area",
+                                    help="전용면적 (농어촌특별세 면제 기준: 85m² 이하)")
+        _tc_holding = st.slider("보유 기간 (년)", min_value=1, max_value=30, value=5, key="tc_holding")
+        _tc_residence = st.slider(
+            "거주 기간 (년)",
+            min_value=0,
+            max_value=_tc_holding,
+            value=min(2, _tc_holding),
+            key="tc_residence",
+            help="1세대1주택 비과세: 보유 2년 + 거주 2년 이상 필요 (조정지역)",
+        )
+
+        st.subheader("주택 현황")
+        _tc_num_homes_str = st.selectbox(
+            "매수 후 보유 주택 수",
+            ["1주택", "2주택", "3주택 이상"],
+            key="tc_num_homes",
+        )
+        _tc_num_homes = {"1주택": 1, "2주택": 2, "3주택 이상": 3}[_tc_num_homes_str]
+        _tc_is_one_home = _tc_num_homes == 1
+        _tc_is_first = st.checkbox("생애최초 주택 구입 (취득세 감면)", value=False, key="tc_is_first")
+        _tc_is_adjusted = st.checkbox("조정대상지역 여부", value=True, key="tc_is_adjusted",
+                                       help="조정대상지역은 2주택 이상 취득세·양도세 중과 적용")
+
+    with _tc_right:
+        st.subheader("대출 및 수익 정보")
+        _tc_loan = st.number_input("대출금액 (만원)", min_value=0, value=20000, step=1000, key="tc_loan")
+        _tc_rate = st.number_input("대출금리 (%)", min_value=0.1, max_value=30.0, value=3.5, step=0.1, key="tc_rate")
+        _tc_monthly_income = st.number_input(
+            "월 임대소득 (만원, 없으면 0)",
+            min_value=0,
+            value=0,
+            step=10,
+            key="tc_monthly_income",
+            help="임대로 운용 시 월 임대료 수입",
+        )
+        _tc_annual_exp = st.number_input(
+            "연간 유지비 (만원)",
+            min_value=0,
+            value=100,
+            step=10,
+            key="tc_annual_exp",
+            help="연간 재산세 + 관리비 + 수선비 등",
+        )
+        _tc_deductible = st.number_input(
+            "필요경비 (만원)",
+            min_value=0,
+            value=500,
+            step=100,
+            key="tc_deductible",
+            help="양도세 필요경비: 취득 시 중개수수료 + 인테리어 + 등기비용 등 (취득세 제외)",
+        )
+
+    st.divider()
+
+    # ── 세금 계산 실행 ──────────────────────────────────────────────────────
+    _tc_acq = calc_acquisition_tax(
+        price_만원=_tc_buy,
+        num_homes=_tc_num_homes,
+        area_m2=_tc_area,
+        is_first_home=_tc_is_first,
+        is_adjusted_zone=_tc_is_adjusted,
+    )
+    _tc_cgt = calc_capital_gains_tax(
+        buy_price_만원=_tc_buy,
+        sell_price_만원=_tc_sell,
+        holding_years=_tc_holding,
+        residence_years=_tc_residence,
+        is_one_home=_tc_is_one_home,
+        num_homes=_tc_num_homes,
+        deductible_costs_만원=_tc_deductible,
+    )
+    _tc_roi = calc_investment_return(
+        buy_price_만원=_tc_buy,
+        sell_price_만원=_tc_sell,
+        holding_years=_tc_holding,
+        loan_amount_만원=_tc_loan,
+        loan_rate_pct=_tc_rate,
+        monthly_income_만원=_tc_monthly_income,
+        annual_expenses_만원=_tc_annual_exp,
+        acquisition_tax_만원=_tc_acq["합계(만원)"],
+        capital_gains_tax_만원=_tc_cgt["합계(만원)"],
+    )
+
+    # ── 결과 카드 ────────────────────────────────────────────────────────────
+    st.subheader("계산 결과")
+
+    _res_c1, _res_c2, _res_c3, _res_c4 = st.columns(4)
+    with _res_c1:
+        st.metric(
+            "취득세 합계",
+            f"{_tc_acq['합계(만원)']:,.0f} 만원",
+            help=_tc_acq["취득세율_설명"],
+        )
+    with _res_c2:
+        if _tc_cgt["비과세여부"]:
+            st.metric("양도소득세", "비과세", help=_tc_cgt["비과세사유"])
+        else:
+            st.metric(
+                "양도소득세 합계",
+                f"{_tc_cgt['합계(만원)']:,.0f} 만원",
+                help=f"세율 {_tc_cgt['세율(%)']:.0f}%, 장특공 {_tc_cgt['장기보유특별공제율(%)']:.0f}%",
+            )
+    with _res_c3:
+        _roi_delta_color = "normal" if _tc_roi["ROE(%)"] >= 0 else "inverse"
+        st.metric(
+            "자기자본 수익률 (ROE)",
+            f"{_tc_roi['ROE(%)']:+.1f} %",
+        )
+    with _res_c4:
+        st.metric(
+            "연환산 수익률 (CAGR)",
+            f"{_tc_roi['연환산ROE_CAGR(%)']:+.1f} % / 년",
+        )
+
+    # ── 순수익 하이라이트 ────────────────────────────────────────────────────
+    _net = _tc_roi["순수익(만원)"]
+    _net_color = "#4CAF50" if _net >= 0 else "#F44336"
+    st.markdown(
+        f"""
+        <div style="background:{_net_color}22; border-left: 4px solid {_net_color}; padding: 12px 16px; border-radius: 4px; margin: 8px 0;">
+        <span style="font-size:1.1em; font-weight:600;">순수익:</span>
+        <span style="font-size:1.4em; font-weight:700; color:{_net_color}; margin-left:12px;">
+            {_net:+,.0f} 만원
+        </span>
+        <span style="margin-left:24px; color:#666;">
+            손익분기 매도가: {_tc_roi['손익분기매도가(만원)']:,.0f} 만원
+        </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.divider()
+
+    # ── 비용 breakdown 차트 ─────────────────────────────────────────────────
+    st.subheader("비용 구성")
+    _breakdown_c1, _breakdown_c2 = st.columns(2)
+
+    with _breakdown_c1:
+        # 파이 차트: 총비용 항목별
+        _cost_labels = ["취득세", "이자비용", "유지비", "양도세"]
+        _cost_values = [
+            _tc_acq["합계(만원)"],
+            _tc_roi["이자비용(만원)"],
+            float(_tc_annual_exp) * _tc_holding,
+            _tc_cgt["합계(만원)"],
+        ]
+        _cost_values_pos = [max(v, 0) for v in _cost_values]
+        if sum(_cost_values_pos) > 0:
+            _cost_fig = go.Figure(go.Pie(
+                labels=_cost_labels,
+                values=_cost_values_pos,
+                hole=0.4,
+                textinfo="label+percent",
+                marker=dict(colors=["#FF9800", "#F44336", "#9C27B0", "#2196F3"]),
+            ))
+            _cost_fig.update_layout(
+                title="총비용 구성",
+                height=320,
+                margin=dict(t=40, b=10, l=10, r=10),
+            )
+            st.plotly_chart(_cost_fig, use_container_width=True)
+
+    with _breakdown_c2:
+        # 막대 차트: 매수가 vs 비용 vs 매도가
+        _summary_labels = ["매수가", "취득세", "이자비용", "유지비", "양도세", "임대수입", "매도가"]
+        _summary_values = [
+            _tc_buy,
+            _tc_acq["합계(만원)"],
+            _tc_roi["이자비용(만원)"],
+            float(_tc_annual_exp) * _tc_holding,
+            _tc_cgt["합계(만원)"],
+            -_tc_roi["임대수입(만원)"],  # 수입은 음수(비용 절감 효과)
+            _tc_sell,
+        ]
+        _bar_colors = ["#2196F3", "#FF9800", "#F44336", "#9C27B0", "#FF5722", "#4CAF50", "#3F51B5"]
+        _summary_fig = go.Figure(go.Bar(
+            x=_summary_labels,
+            y=_summary_values,
+            marker_color=_bar_colors,
+            text=[f"{v:,.0f}" for v in _summary_values],
+            textposition="outside",
+        ))
+        _summary_fig.update_layout(
+            title="매수가·비용·임대수입·매도가 비교",
+            yaxis_title="금액 (만원)",
+            height=320,
+            yaxis=dict(tickformat=","),
+            margin=dict(t=40, b=10),
+        )
+        st.plotly_chart(_summary_fig, use_container_width=True)
+
+    # ── 상세 내역 ────────────────────────────────────────────────────────────
+    with st.expander("취득세 상세 내역"):
+        _acq_detail = {
+            "항목": ["취득세율", "취득세", "지방교육세", "농어촌특별세", "합계", "실효세율", "세율 설명"],
+            "내용": [
+                f"{_tc_acq['취득세율(%)']:.4f} %",
+                f"{_tc_acq['취득세(만원)']:,.1f} 만원",
+                f"{_tc_acq['지방교육세(만원)']:,.1f} 만원",
+                f"{_tc_acq['농어촌특별세(만원)']:,.1f} 만원",
+                f"{_tc_acq['합계(만원)']:,.1f} 만원",
+                f"{_tc_acq['실효세율(%)']:.4f} %",
+                _tc_acq["취득세율_설명"],
+            ],
+        }
+        st.dataframe(pd.DataFrame(_acq_detail), use_container_width=True, hide_index=True)
+
+    with st.expander("양도소득세 상세 내역"):
+        if _tc_cgt["비과세여부"]:
+            st.success(f"비과세: {_tc_cgt['비과세사유']}")
+        else:
+            _cgt_detail_dict = _tc_cgt["상세내역"]
+            _cgt_display = {
+                "항목": list(_cgt_detail_dict.keys()),
+                "내용": [str(v) for v in _cgt_detail_dict.values()],
+            }
+            st.dataframe(pd.DataFrame(_cgt_display), use_container_width=True, hide_index=True)
+
+    with st.expander("투자 수익률 상세 내역"):
+        _roi_detail = _tc_roi["상세내역"]
+        _roi_display = {
+            "항목": list(_roi_detail.keys()),
+            "내용": [f"{v:,.0f}" if isinstance(v, (int, float)) else str(v) for v in _roi_detail.values()],
+        }
+        st.dataframe(pd.DataFrame(_roi_display), use_container_width=True, hide_index=True)
+
+
+# ============================
 # Tab 10: 소득-매물 매칭
 # ============================
 with main_tab10:
