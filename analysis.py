@@ -785,6 +785,13 @@ def rank_sigungu_grade(apt_df, nps_df, nts_df=None, year=None):
 
     if nps_col_year and nps_col_amount and nps_col_sub:
         nps_yr = nps_df[nps_df[nps_col_year] == year].copy()
+        # NPS에 해당 연도가 없으면 가장 가까운 이전 연도 사용
+        if nps_yr.empty:
+            avail_years = sorted(nps_df[nps_col_year].unique())
+            prev_years = [y for y in avail_years if y <= year]
+            fallback_year = prev_years[-1] if prev_years else (avail_years[-1] if avail_years else None)
+            if fallback_year is not None:
+                nps_yr = nps_df[nps_df[nps_col_year] == fallback_year].copy()
         nps_yr = nps_yr.dropna(subset=[nps_col_amount, nps_col_sub])
         nps_yr["_w"] = nps_yr[nps_col_amount] * nps_yr[nps_col_sub]
         nps_agg = nps_yr.groupby("지역코드", as_index=False).agg(
