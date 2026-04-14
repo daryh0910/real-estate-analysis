@@ -2058,6 +2058,15 @@ with main_tab8:
                         "갭": st.column_config.NumberColumn("갭(만원)", help="시장가격 - 구매력 (음수=살 수 있음)"),
                     },
                 )
+                # 매칭 결과 CSV 다운로드
+                _csv_match = _match_df[_mt_disp_cols].to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    label="📥 매칭결과 CSV 다운로드",
+                    data=_csv_match,
+                    file_name=f"income_match_{_match_year}.csv",
+                    mime="text/csv",
+                    key="dl_match",
+                )
 
                 # 계단 차트: 구매력 곡선 vs 급지별 시장가격 오버레이
                 _pct_col2 = "percentile" if "percentile" in _pp_df.columns else _pp_df.columns[0]
