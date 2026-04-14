@@ -68,6 +68,7 @@ asset_df = data.get("asset", pd.DataFrame())
 yearly_df = data.get("yearly", pd.DataFrame())
 monthly_df = data.get("monthly", pd.DataFrame())
 policy_events_df = data.get("policy_events", pd.DataFrame())
+quintile_df = data.get("quintile", pd.DataFrame())
 
 # --- 사이드바 필터 ---
 st.sidebar.title("필터 설정")
