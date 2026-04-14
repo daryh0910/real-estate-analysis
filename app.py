@@ -320,174 +320,378 @@ main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6, main_tab7, mai
 # ============================
 # Tab 1: Overview
 # ============================
+
+# 밸류스코어 캐싱 함수
+@st.cache_data(show_spinner=False)
+def _cached_value_score(_apt_df, _jeonse_df, _nps_df, year):
+    """밸류스코어 계산 캐싱 (언더스코어 접두어로 해싱 제외)"""
+    return compute_value_score(_apt_df, _jeonse_df, _nps_df, year=year)
+
+@st.cache_data(show_spinner=False)
+def _cached_rank_sigungu(_apt_df, _nps_df, year):
+    """시군구 급지순위 캐싱"""
+    return rank_sigungu_grade(_apt_df, _nps_df, year=year)
+
 with main_tab1:
-    st.header(f"주요 지표 Overview ({mode_label})")
+    st.header(f"시장 Overview ({mode_label})")
 
-    if analysis_mode == "매매 분석":
-        main_filtered = filtered_apt
-    else:
-        main_filtered = filtered_rent
+    # ──────────────────────────────────────────────────
+    # Zone A: 시장 온도계 (Hero Section)
+    # ──────────────────────────────────────────────────
+    zone_a_left, zone_a_mid, zone_a_right = st.columns([1.2, 1.2, 1])
 
-    if main_filtered.empty:
-        st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
-    else:
-        # KPI 카드
-        cols = st.columns(5)
+    # [좌] 시장 종합 스코어 게이지
+    with zone_a_left:
+        try:
+            mkt_score, mkt_delta, mkt_breakdown = compute_market_temperature(analysis_df)
+            # 0~100 게이지: 50이 중립, 높을수록 과열
+            fig_mkt_gauge = go.Figure(go.Indicator(
+                mode="gauge+number+delta",
+                value=mkt_score,
+                title={"text": "시장 종합 온도계", "font": {"size": 14}},
+                delta={"reference": 50, "valueformat": ".1f"},
+                gauge={
+                    "axis": {"range": [0, 100], "tickwidth": 1},
+                    "bar": {"color": "firebrick" if mkt_score > 60 else ("royalblue" if mkt_score < 40 else "orange")},
+                    "steps": [
+                        {"range": [0, 40],  "color": "#d0e8ff"},
+                        {"range": [40, 60], "color": "#fff3cd"},
+                        {"range": [60, 100],"color": "#ffd6d6"},
+                    ],
+                    "threshold": {
+                        "line": {"color": "black", "width": 3},
+                        "thickness": 0.75,
+                        "value": 50,
+                    },
+                },
+            ))
+            fig_mkt_gauge.update_layout(height=280, margin=dict(t=50, b=10, l=10, r=10))
+            register_fig("시장온도계_게이지", fig_mkt_gauge, "Overview")
+            st.plotly_chart(fig_mkt_gauge, use_container_width=True)
+            # 세부 breakdown 표시
+            if mkt_breakdown:
+                with st.expander("온도계 구성 요소"):
+                    for k, v in mkt_breakdown.items():
+                        st.caption(f"{k}: {v:.1f}" if isinstance(v, (int, float)) else f"{k}: {v}")
+        except Exception as e:
+            st.info(f"시장 온도계를 계산할 수 없습니다: {e}")
 
-        if analysis_mode == "매매 분석":
-            with cols[0]:
-                st.metric("평균 거래가격", f"{filtered_apt['평균가격'].mean():,.0f}만원")
-            with cols[1]:
-                st.metric("총 거래량", f"{filtered_apt['거래량'].sum():,.0f}건")
-            with cols[2]:
-                st.metric("평균 단가(m2)", f"{filtered_apt['평균단가_per_m2'].mean():,.0f}만원/m2")
-        else:
-            with cols[0]:
-                st.metric("평균 보증금", f"{filtered_rent['보증금평균'].mean():,.0f}만원")
-            with cols[1]:
-                st.metric("총 거래량", f"{filtered_rent['임대거래량'].sum():,.0f}건")
-            with cols[2]:
-                st.metric("보증금 단가(m2)", f"{filtered_rent['보증금단가_per_m2'].mean():,.0f}만원/m2")
+    # [중] KPI 카드 3개 (최신 연도 기준, YoY delta)
+    with zone_a_mid:
+        if analysis_mode == "매매 분석" and not apt_df.empty and "연도" in apt_df.columns:
+            yr_latest = int(apt_df["연도"].max())
+            yr_prev   = yr_latest - 1
 
-        with cols[3]:
-            if "총인구" in analysis_df.columns and not analysis_df["총인구"].dropna().empty:
-                pop = analysis_df["총인구"].dropna().iloc[-1]
-                st.metric("인구(최근)", f"{pop:,.0f}명")
-            else:
-                st.metric("인구", "N/A")
-        with cols[4]:
-            if "GRDP" in analysis_df.columns and not analysis_df["GRDP"].dropna().empty:
-                grdp_val = analysis_df["GRDP"].dropna().iloc[-1]
-                st.metric("GRDP(최근)", f"{grdp_val:,.0f}백만원")
-            else:
-                st.metric("GRDP", "N/A")
+            # 연도별 시도 평균 (필터 적용)
+            _grp = filtered_apt.groupby("연도")
 
-        # 시계열 트렌드
-        st.subheader(f"{mode_label} 가격 트렌드")
+            # 평균가격 KPI
+            _price_now  = _grp["평균가격"].mean().get(yr_latest, None)
+            _price_prev = _grp["평균가격"].mean().get(yr_prev, None)
+            _price_delta = None
+            if _price_now is not None and _price_prev is not None and _price_prev != 0:
+                _price_delta = f"{(_price_now - _price_prev) / _price_prev * 100:+.1f}%"
 
-        if analysis_mode == "매매 분석":
-            # 매매 트렌드
-            if selected_codes:
-                time_col = "연월" if freq == "월별" and "연월" in filtered_apt.columns else "연도"
-                chart_df = aggregate_by_code(filtered_apt, time_col)
-                color_col = "지역코드"
-            else:
-                chart_df = analysis_df
-                time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
-                color_col = "시도"
-            _price_col, _vol_col = "평균가격", "거래량"
-        else:
-            # 임대차 트렌드
-            if selected_codes:
-                time_col = "연월" if freq == "월별" and "연월" in filtered_rent.columns else "연도"
-                chart_df = aggregate_rent_by_code(filtered_rent, time_col)
-                color_col = "지역코드"
-            else:
-                chart_df = analysis_df
-                time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
-                color_col = "시도"
-            _price_col, _vol_col = price_col, vol_col
+            # 거래량 KPI
+            _vol_now  = _grp["거래량"].sum().get(yr_latest, None)
+            _vol_prev = _grp["거래량"].sum().get(yr_prev, None)
+            _vol_delta = None
+            if _vol_now is not None and _vol_prev is not None:
+                _vol_delta = f"{int(_vol_now - _vol_prev):+,}건"
 
-        if not chart_df.empty and _price_col in chart_df.columns:
-            fig_price = px.line(
-                chart_df.sort_values([time_col]),
-                x=time_col, y=_price_col, color=color_col,
-                title=f"{mode_label} 평균 가격 추이",
-                labels={_price_col: "가격(만원)", time_col: "기간"},
+            # 전세가율 KPI (yearly_df 기반)
+            _jeonse_rate_now  = None
+            _jeonse_rate_prev = None
+            if "전세가율" in analysis_df.columns:
+                _yr_grp = analysis_df.groupby("연도")["전세가율"].mean()
+                _jeonse_rate_now  = _yr_grp.get(yr_latest, None)
+                _jeonse_rate_prev = _yr_grp.get(yr_prev, None)
+            _jeonse_delta = None
+            if _jeonse_rate_now is not None and _jeonse_rate_prev is not None:
+                _jeonse_delta = f"{_jeonse_rate_now - _jeonse_rate_prev:+.1f}%p"
+
+            st.metric(
+                f"평균가격 ({yr_latest})",
+                f"{_price_now:,.0f}만원" if _price_now is not None else "N/A",
+                delta=_price_delta,
             )
-            register_fig("매매가격_추이", fig_price, "Overview")
-            st.plotly_chart(fig_price, use_container_width=True)
-
-        if not chart_df.empty and _vol_col in chart_df.columns:
-            fig_vol = px.bar(
-                chart_df.sort_values([time_col]),
-                x=time_col, y=_vol_col, color=color_col,
-                title=f"{mode_label} 거래량 추이",
-                labels={_vol_col: "거래건수", time_col: "기간"},
+            st.metric(
+                f"거래량 ({yr_latest})",
+                f"{int(_vol_now):,}건" if _vol_now is not None else "N/A",
+                delta=_vol_delta,
             )
-            register_fig("거래량_추이", fig_vol, "Overview")
-            st.plotly_chart(fig_vol, use_container_width=True)
+            st.metric(
+                "전세가율",
+                f"{_jeonse_rate_now:.1f}%" if _jeonse_rate_now is not None else "N/A",
+                delta=_jeonse_delta,
+            )
+        else:
+            st.info("매매 분석 모드에서 KPI가 표시됩니다.")
 
-        # ── 시장심리 게이지 (KB 매수우위지수, 주택가격전망CSI) ──────
-        gauge_cols_check = ["KB_매수우위지수", "주택가격전망CSI"]
-        gauge_available = [c for c in gauge_cols_check if c in analysis_df.columns and analysis_df[c].notna().any()]
-        if gauge_available:
-            st.subheader("시장심리 지표")
-            g_col1, g_col2 = st.columns(2)
-
-            # KB 매수우위지수 게이지 (0~200, 100이 중립)
-            if "KB_매수우위지수" in gauge_available:
-                kb_series = analysis_df["KB_매수우위지수"].dropna()
-                kb_val = float(kb_series.iloc[-1]) if not kb_series.empty else None
-                if kb_val is not None:
-                    fig_gauge_kb = go.Figure(go.Indicator(
+    # [우] 시장심리 미니 게이지 2개 (KB 매수우위, CSI)
+    with zone_a_right:
+        _gauge_cols = ["KB_매수우위지수", "주택가격전망CSI"]
+        _gauge_avail = [c for c in _gauge_cols if c in analysis_df.columns and analysis_df[c].notna().any()]
+        if _gauge_avail:
+            for _gc in _gauge_avail:
+                _gs = analysis_df[_gc].dropna()
+                _gv = float(_gs.iloc[-1]) if not _gs.empty else None
+                if _gv is not None:
+                    _gfig = go.Figure(go.Indicator(
                         mode="gauge+number+delta",
-                        value=kb_val,
-                        title={"text": "KB 매수우위지수"},
+                        value=_gv,
+                        title={"text": _gc, "font": {"size": 11}},
                         delta={"reference": 100, "valueformat": ".1f"},
                         gauge={
                             "axis": {"range": [0, 200]},
-                            "bar": {"color": "darkblue"},
+                            "bar": {"color": "darkblue" if "매수" in _gc else "darkorange"},
                             "steps": [
                                 {"range": [0, 80],   "color": "lightblue"},
                                 {"range": [80, 120],  "color": "lightyellow"},
                                 {"range": [120, 200], "color": "lightsalmon"},
                             ],
                             "threshold": {
-                                "line": {"color": "red", "width": 4},
+                                "line": {"color": "red", "width": 3},
                                 "thickness": 0.75,
                                 "value": 100,
                             },
                         },
                     ))
-                    fig_gauge_kb.update_layout(height=300)
-                    with g_col1:
-                        register_fig("KB_매수우위_게이지", fig_gauge_kb, "Overview")
-                        st.plotly_chart(fig_gauge_kb, use_container_width=True)
+                    _gfig.update_layout(height=250, margin=dict(t=40, b=5, l=5, r=5))
+                    register_fig(f"{_gc}_게이지", _gfig, "Overview")
+                    st.plotly_chart(_gfig, use_container_width=True)
+        else:
+            st.info("KB 지수 / CSI 데이터가 없습니다.")
 
-            # 주택가격전망CSI 게이지 (0~200, 100이 중립)
-            if "주택가격전망CSI" in gauge_available:
-                csi_series = analysis_df["주택가격전망CSI"].dropna()
-                csi_val = float(csi_series.iloc[-1]) if not csi_series.empty else None
-                if csi_val is not None:
-                    fig_gauge_csi = go.Figure(go.Indicator(
-                        mode="gauge+number+delta",
-                        value=csi_val,
-                        title={"text": "주택가격전망CSI"},
-                        delta={"reference": 100, "valueformat": ".1f"},
-                        gauge={
-                            "axis": {"range": [0, 200]},
-                            "bar": {"color": "darkorange"},
-                            "steps": [
-                                {"range": [0, 80],   "color": "lightblue"},
-                                {"range": [80, 120],  "color": "lightyellow"},
-                                {"range": [120, 200], "color": "lightsalmon"},
-                            ],
-                            "threshold": {
-                                "line": {"color": "red", "width": 4},
-                                "thickness": 0.75,
-                                "value": 100,
-                            },
-                        },
-                    ))
-                    fig_gauge_csi.update_layout(height=300)
-                    with g_col2:
-                        register_fig("CSI_게이지", fig_gauge_csi, "Overview")
-                        st.plotly_chart(fig_gauge_csi, use_container_width=True)
+    st.divider()
 
-        # 원인 지표 트렌드 (시도 레벨)
-        extra_vars = [v for v in cause_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
-        if extra_vars:
-            st.subheader("원인 지표 트렌드")
-            ts_time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
-            for var in extra_vars:
-                fig = px.line(
-                    analysis_df.sort_values([ts_time_col]),
-                    x=ts_time_col, y=var, color="시도",
-                    title=f"{var} 추이",
+    # ──────────────────────────────────────────────────
+    # Zone B: 저평가 / 고평가 TOP 10
+    # ──────────────────────────────────────────────────
+    st.subheader("저평가·고평가 지역 순위")
+    try:
+        _vs_year = int(apt_df["연도"].max()) if not apt_df.empty else None
+        _value_df = _cached_value_score(apt_df, jeonse_df, nps_df, _vs_year)
+
+        if _value_df.empty:
+            st.warning("밸류스코어를 계산할 데이터가 부족합니다. (apt/jeonse/nps 데이터 확인 필요)")
+        else:
+            _b_left, _b_right = st.columns(2)
+
+            # 저평가 TOP 10 (밸류스코어 상위 = 상대적으로 저평가)
+            with _b_left:
+                st.markdown("**저평가 TOP 10**")
+                _underval = _value_df.sort_values("밸류스코어", ascending=False).head(10).copy()
+                _underval["표시명"] = _underval.apply(
+                    lambda r: f"{r.get('시군구명', r.get('지역코드',''))}" +
+                              (f" ({r['시도']})" if "시도" in r and pd.notna(r["시도"]) else ""),
+                    axis=1
                 )
-                register_fig("정책이벤트_차트", fig, "Overview")
-                st.plotly_chart(fig, use_container_width=True)
+                _underval["hover_text"] = _underval.apply(
+                    lambda r: f"전세가율: {r.get('전세가율', float('nan')):.1f}%  PIR: {r.get('PIR_NPS', float('nan')):.1f}배",
+                    axis=1
+                )
+                fig_under = px.bar(
+                    _underval,
+                    x="밸류스코어", y="표시명",
+                    orientation="h",
+                    color_discrete_sequence=["#2ecc71"],
+                    text=_underval.apply(
+                        lambda r: f"{r.get('전세가율', float('nan')):.0f}% | {r.get('PIR_NPS', float('nan')):.1f}배",
+                        axis=1
+                    ),
+                    labels={"밸류스코어": "밸류스코어", "표시명": ""},
+                )
+                fig_under.update_traces(textposition="outside")
+                fig_under.update_layout(
+                    height=350, margin=dict(t=20, b=20, l=10, r=20),
+                    yaxis=dict(autorange="reversed"),
+                )
+                register_fig("저평가_TOP10", fig_under, "Overview")
+                st.plotly_chart(fig_under, use_container_width=True)
+
+            # 고평가 TOP 10 (밸류스코어 하위 = 상대적으로 고평가)
+            with _b_right:
+                st.markdown("**고평가 TOP 10**")
+                _overval = _value_df.sort_values("밸류스코어", ascending=True).head(10).copy()
+                _overval["표시명"] = _overval.apply(
+                    lambda r: f"{r.get('시군구명', r.get('지역코드',''))}" +
+                              (f" ({r['시도']})" if "시도" in r and pd.notna(r["시도"]) else ""),
+                    axis=1
+                )
+                fig_over = px.bar(
+                    _overval,
+                    x="밸류스코어", y="표시명",
+                    orientation="h",
+                    color_discrete_sequence=["#e74c3c"],
+                    text=_overval.apply(
+                        lambda r: f"{r.get('전세가율', float('nan')):.0f}% | {r.get('PIR_NPS', float('nan')):.1f}배",
+                        axis=1
+                    ),
+                    labels={"밸류스코어": "밸류스코어", "표시명": ""},
+                )
+                fig_over.update_traces(textposition="outside")
+                fig_over.update_layout(
+                    height=350, margin=dict(t=20, b=20, l=10, r=20),
+                    yaxis=dict(autorange="reversed"),
+                )
+                register_fig("고평가_TOP10", fig_over, "Overview")
+                st.plotly_chart(fig_over, use_container_width=True)
+
+            # 상세 데이터 expander
+            with st.expander("상세 데이터 (전체 밸류스코어 테이블)"):
+                _disp_cols = [c for c in ["시군구명", "시도", "밸류스코어", "전세가율", "PIR_NPS", "거래회전율_proxy", "가격모멘텀"] if c in _value_df.columns]
+                st.dataframe(
+                    _value_df[_disp_cols].sort_values("밸류스코어", ascending=False),
+                    use_container_width=True,
+                    height=350,
+                )
+    except Exception as e:
+        st.error(f"밸류스코어 계산 오류: {e}")
+
+    st.divider()
+
+    # ──────────────────────────────────────────────────
+    # Zone C: 핵심 트렌드 2x2
+    # ──────────────────────────────────────────────────
+    st.subheader("핵심 트렌드")
+    _ov_tc = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
+
+    _trend_c1, _trend_c2 = st.columns(2)
+
+    # (1,1) 가격 + 거래량 듀얼축
+    with _trend_c1:
+        try:
+            if analysis_mode == "매매 분석":
+                _tc_price_col = "평균가격"
+                _tc_vol_col   = "거래량"
+                _tc_df = filtered_apt
+            else:
+                _tc_price_col = price_col
+                _tc_vol_col   = vol_col
+                _tc_df = analysis_df
+
+            if not _tc_df.empty and _tc_price_col in _tc_df.columns and _tc_vol_col in _tc_df.columns:
+                _tc_grp = _tc_df.groupby(_ov_tc).agg(
+                    가격평균=(_tc_price_col, "mean"),
+                    거래량합=(_tc_vol_col, "sum"),
+                ).reset_index().sort_values(_ov_tc)
+
+                fig_pv = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_pv.add_trace(
+                    go.Scatter(x=_tc_grp[_ov_tc], y=_tc_grp["가격평균"], name="평균가격", line=dict(color="royalblue")),
+                    secondary_y=False,
+                )
+                fig_pv.add_trace(
+                    go.Bar(x=_tc_grp[_ov_tc], y=_tc_grp["거래량합"], name="거래량", marker_color="lightsteelblue", opacity=0.5),
+                    secondary_y=True,
+                )
+                fig_pv.update_layout(title_text="가격 & 거래량 추이", height=350, legend=dict(orientation="h"))
+                fig_pv.update_yaxes(title_text="평균가격(만원)", secondary_y=False)
+                fig_pv.update_yaxes(title_text="거래량(건)", secondary_y=True)
+                register_fig("가격거래량_듀얼", fig_pv, "Overview")
+                st.plotly_chart(fig_pv, use_container_width=True)
+            else:
+                st.info("가격/거래량 데이터 없음")
+        except Exception as e:
+            st.error(f"가격·거래량 차트 오류: {e}")
+
+    # (1,2) 금리 vs 전세가율 듀얼축
+    with _trend_c2:
+        try:
+            _rate_col    = next((c for c in ["기준금리", "CD_91일", "국고채_3년"] if c in analysis_df.columns and analysis_df[c].notna().any()), None)
+            _jeonse_rate = "전세가율" if "전세가율" in analysis_df.columns and analysis_df["전세가율"].notna().any() else None
+
+            if _rate_col and _jeonse_rate:
+                _rj_df = analysis_df.groupby(_ov_tc).agg(
+                    금리=(_rate_col, "mean"),
+                    전세가율=(_jeonse_rate, "mean"),
+                ).reset_index().sort_values(_ov_tc)
+
+                fig_rj = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_rj.add_trace(
+                    go.Scatter(x=_rj_df[_ov_tc], y=_rj_df["금리"], name=_rate_col, line=dict(color="tomato")),
+                    secondary_y=False,
+                )
+                fig_rj.add_trace(
+                    go.Scatter(x=_rj_df[_ov_tc], y=_rj_df["전세가율"], name="전세가율", line=dict(color="seagreen", dash="dash")),
+                    secondary_y=True,
+                )
+                fig_rj.update_layout(title_text=f"{_rate_col} vs 전세가율", height=350, legend=dict(orientation="h"))
+                fig_rj.update_yaxes(title_text=f"{_rate_col}(%)", secondary_y=False)
+                fig_rj.update_yaxes(title_text="전세가율(%)", secondary_y=True)
+                register_fig("금리_전세가율_듀얼", fig_rj, "Overview")
+                st.plotly_chart(fig_rj, use_container_width=True)
+            else:
+                st.info("금리 또는 전세가율 데이터 없음")
+        except Exception as e:
+            st.error(f"금리·전세가율 차트 오류: {e}")
+
+    _trend_c3, _trend_c4 = st.columns(2)
+
+    # (2,1) 미분양 + 인허가 추이
+    with _trend_c3:
+        try:
+            _unsold_col = next((c for c in ["미분양_평균", "미분양_호수"] if c in analysis_df.columns and analysis_df[c].notna().any()), None)
+            _permit_col = "인허가_호수" if "인허가_호수" in analysis_df.columns and analysis_df["인허가_호수"].notna().any() else None
+
+            if _unsold_col or _permit_col:
+                _up_fig = make_subplots(specs=[[{"secondary_y": True}]])
+                if _unsold_col:
+                    _up_df = analysis_df.groupby(_ov_tc)[_unsold_col].mean().reset_index().sort_values(_ov_tc)
+                    _up_fig.add_trace(
+                        go.Bar(x=_up_df[_ov_tc], y=_up_df[_unsold_col], name="미분양", marker_color="salmon", opacity=0.7),
+                        secondary_y=False,
+                    )
+                if _permit_col:
+                    _pp_df = analysis_df.groupby(_ov_tc)[_permit_col].sum().reset_index().sort_values(_ov_tc)
+                    _up_fig.add_trace(
+                        go.Scatter(x=_pp_df[_ov_tc], y=_pp_df[_permit_col], name="인허가", line=dict(color="steelblue")),
+                        secondary_y=True,
+                    )
+                _up_fig.update_layout(title_text="미분양 & 인허가 추이", height=350, legend=dict(orientation="h"))
+                if _unsold_col:
+                    _up_fig.update_yaxes(title_text=f"{_unsold_col}(호)", secondary_y=False)
+                if _permit_col:
+                    _up_fig.update_yaxes(title_text="인허가(호)", secondary_y=True)
+                register_fig("미분양_인허가_추이", _up_fig, "Overview")
+                st.plotly_chart(_up_fig, use_container_width=True)
+            else:
+                st.info("미분양/인허가 데이터 없음")
+        except Exception as e:
+            st.error(f"미분양·인허가 차트 오류: {e}")
+
+    # (2,2) 소득 vs 가격변화율 듀얼축
+    with _trend_c4:
+        try:
+            _income_col = next((c for c in ["NPS_1인당고지금액", "가구_소득평균", "1인당총급여_백만원"] if c in analysis_df.columns and analysis_df[c].notna().any()), None)
+            _mom_col    = "가격변화율_YoY" if "가격변화율_YoY" in analysis_df.columns and analysis_df["가격변화율_YoY"].notna().any() else None
+
+            if _income_col or _mom_col:
+                _im_fig = make_subplots(specs=[[{"secondary_y": True}]])
+                if _income_col:
+                    _id_df = analysis_df.groupby(_ov_tc)[_income_col].mean().reset_index().sort_values(_ov_tc)
+                    _im_fig.add_trace(
+                        go.Scatter(x=_id_df[_ov_tc], y=_id_df[_income_col], name=_income_col, line=dict(color="goldenrod")),
+                        secondary_y=False,
+                    )
+                if _mom_col:
+                    _md_df = analysis_df.groupby(_ov_tc)[_mom_col].mean().reset_index().sort_values(_ov_tc)
+                    _im_fig.add_trace(
+                        go.Scatter(x=_md_df[_ov_tc], y=_md_df[_mom_col], name="가격변화율(YoY)", line=dict(color="mediumpurple", dash="dot")),
+                        secondary_y=True,
+                    )
+                _im_fig.update_layout(title_text="소득 vs 가격변화율", height=350, legend=dict(orientation="h"))
+                if _income_col:
+                    _im_fig.update_yaxes(title_text=f"{_income_col}", secondary_y=False)
+                if _mom_col:
+                    _im_fig.update_yaxes(title_text="가격변화율(%)", secondary_y=True)
+                register_fig("소득_가격모멘텀", _im_fig, "Overview")
+                st.plotly_chart(_im_fig, use_container_width=True)
+            else:
+                st.info("소득/가격변화율 데이터 없음")
+        except Exception as e:
+            st.error(f"소득·가격변화율 차트 오류: {e}")
 
 
 # ============================
