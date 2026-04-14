@@ -382,3 +382,524 @@ def granger_causality_test(df, y_var, x_var, max_lag=4, group_col="시도"):
             continue
 
     return pd.DataFrame(results)
+
+
+# ── 밸류 스코어 ────────────────────────────────────────────────────────────
+
+def compute_value_score(apt_df, jeonse_df, nps_df, nts_df=None, year=None):
+    """
+    시군구별 저평가/고평가 밸류 스코어 계산
+
+    Args:
+        apt_df: 매매 실거래 DataFrame [지역코드, 시도, 연도, 평균가격, 거래량, 평균단가_per_m2]
+        jeonse_df: 전세 실거래 DataFrame [지역코드, 시도, 연도, 보증금평균, 보증금단가_per_m2]
+        nps_df: NPS DataFrame [지역코드, 시도, 연도, NPS_가입자수, NPS_1인당고지금액]
+        nts_df: 국세청 근로소득 DataFrame (optional) [지역코드, 시도, 연도, 1인당총급여_백만원]
+        year: 기준 연도. None이면 최신 연도.
+
+    Returns:
+        DataFrame [지역코드, 시군구명, 시도, 밸류스코어, 전세가율, PIR_NPS, 거래회전율_proxy, 가격모멘텀]
+    """
+    from data_loader import get_sigungu_name
+
+    # 기준 연도 결정
+    if year is None:
+        year = int(apt_df["연도"].max())
+
+    # ── 매매 집계 (해당 연도 시군구별)
+    apt_yr = apt_df[apt_df["연도"] == year].copy()
+    apt_agg = (
+        apt_yr.groupby(["지역코드", "시도"], as_index=False)
+        .agg(평균가격=("평균가격", "mean"), 평균단가=("평균단가_per_m2", "mean"), 거래량=("거래량", "sum"))
+    )
+
+    # ── 전세 집계
+    jeonse_yr = jeonse_df[jeonse_df["연도"] == year].copy() if "연도" in jeonse_df.columns else pd.DataFrame()
+    if not jeonse_yr.empty and "보증금평균" in jeonse_yr.columns:
+        jeonse_agg = (
+            jeonse_yr.groupby("지역코드", as_index=False)
+            .agg(보증금평균=("보증금평균", "mean"))
+        )
+        apt_agg = apt_agg.merge(jeonse_agg, on="지역코드", how="left")
+    else:
+        apt_agg["보증금평균"] = np.nan
+
+    # 전세가율 (%)
+    apt_agg["전세가율"] = np.where(
+        apt_agg["평균가격"] > 0,
+        apt_agg["보증금평균"] / apt_agg["평균가격"] * 100,
+        np.nan,
+    )
+
+    # ── NPS 집계 (연도별 가중평균 — 가입자수 기준)
+    nps_col_year = "연도" if "연도" in nps_df.columns else None
+    nps_col_amount = "NPS_1인당고지금액" if "NPS_1인당고지금액" in nps_df.columns else None
+    nps_col_sub = "NPS_가입자수" if "NPS_가입자수" in nps_df.columns else None
+
+    if nps_col_year and nps_col_amount and nps_col_sub:
+        nps_yr = nps_df[nps_df[nps_col_year] == year].copy()
+        # 시군구별 가중평균
+        nps_yr = nps_yr.dropna(subset=[nps_col_amount, nps_col_sub])
+        nps_yr["_weighted"] = nps_yr[nps_col_amount] * nps_yr[nps_col_sub]
+        nps_agg = nps_yr.groupby("지역코드", as_index=False).agg(
+            _w_sum=("_weighted", "sum"),
+            _sub_sum=(nps_col_sub, "sum"),
+        )
+        nps_agg["NPS_1인당고지금액"] = np.where(
+            nps_agg["_sub_sum"] > 0,
+            nps_agg["_w_sum"] / nps_agg["_sub_sum"],
+            np.nan,
+        )
+        apt_agg = apt_agg.merge(nps_agg[["지역코드", "NPS_1인당고지금액"]], on="지역코드", how="left")
+    else:
+        apt_agg["NPS_1인당고지금액"] = np.nan
+
+    # PIR_NPS: 평균가격(만원) / (NPS 월고지금액(원) → 연소득(만원))
+    # NPS_1인당고지금액 단위가 원이므로: 연소득(만원) = 월고지금액 * 12 / 10000
+    apt_agg["PIR_NPS"] = np.where(
+        apt_agg["NPS_1인당고지금액"] > 0,
+        apt_agg["평균가격"] / (apt_agg["NPS_1인당고지금액"] * 12 / 10000),
+        np.nan,
+    )
+
+    # 거래회전율 proxy = 거래량 (시도 내 min-max 정규화에서 활용)
+    apt_agg["거래회전율_proxy"] = apt_agg["거래량"]
+
+    # ── 가격모멘텀: (year 가격 - year-2 가격) / year-2 가격 * 100
+    apt_prev = apt_df[apt_df["연도"] == year - 2].copy()
+    if not apt_prev.empty and "평균가격" in apt_prev.columns:
+        apt_prev_agg = apt_prev.groupby("지역코드", as_index=False).agg(평균가격_prev=("평균가격", "mean"))
+        apt_agg = apt_agg.merge(apt_prev_agg, on="지역코드", how="left")
+        apt_agg["가격모멘텀"] = np.where(
+            apt_agg["평균가격_prev"] > 0,
+            (apt_agg["평균가격"] - apt_agg["평균가격_prev"]) / apt_agg["평균가격_prev"] * 100,
+            np.nan,
+        )
+    else:
+        apt_agg["가격모멘텀"] = np.nan
+
+    # ── 시도 내 z-score 정규화 헬퍼
+    def zscore_within_sido(df, col):
+        """시도 내 z-score 정규화 (결측치는 그대로 유지)"""
+        result = df[col].copy().astype(float)
+        for sido, grp in df.groupby("시도"):
+            idx = grp.index
+            vals = grp[col].dropna()
+            if len(vals) < 2:
+                continue
+            mu, sigma = vals.mean(), vals.std()
+            if sigma > 0:
+                result.loc[idx] = (df.loc[idx, col] - mu) / sigma
+        return result
+
+    apt_agg["전세가율_z"] = zscore_within_sido(apt_agg, "전세가율")
+    apt_agg["PIR_inv_z"] = zscore_within_sido(apt_agg.assign(PIR_inv=1 / apt_agg["PIR_NPS"].replace(0, np.nan)), "PIR_inv")
+    apt_agg["거래회전율_z"] = zscore_within_sido(apt_agg, "거래회전율_proxy")
+    apt_agg["모멘텀_neg_z"] = zscore_within_sido(apt_agg.assign(모멘텀_neg=-apt_agg["가격모멘텀"]), "모멘텀_neg")
+
+    # ── 밸류스코어 가중합
+    apt_agg["밸류스코어"] = (
+        0.35 * apt_agg["전세가율_z"].fillna(0)
+        + 0.30 * apt_agg["PIR_inv_z"].fillna(0)
+        + 0.15 * apt_agg["거래회전율_z"].fillna(0)
+        + 0.20 * apt_agg["모멘텀_neg_z"].fillna(0)
+    )
+
+    # ── 시군구명 추가
+    apt_agg["시군구명"] = apt_agg["지역코드"].apply(get_sigungu_name)
+
+    # 반환 컬럼 선택
+    result_cols = ["지역코드", "시군구명", "시도", "밸류스코어", "전세가율", "PIR_NPS", "거래회전율_proxy", "가격모멘텀"]
+    return apt_agg[[c for c in result_cols if c in apt_agg.columns]].sort_values("밸류스코어", ascending=False).reset_index(drop=True)
+
+
+# ── 시장 온도 스코어 ────────────────────────────────────────────────────────
+
+def compute_market_temperature(analysis_df):
+    """
+    시장 종합 온도 스코어 계산 (0~100)
+
+    Args:
+        analysis_df: 병합된 분석 DataFrame (시도별, 연도별)
+
+    Returns:
+        tuple (score: float, delta: float, breakdown: dict)
+        - score: 0~100 (0=침체, 100=과열)
+        - delta: 전년 대비 변동분
+        - breakdown: 각 지표별 기여도 dict
+    """
+    def _calc_score(df_yr):
+        """단일 연도 데이터에서 온도 스코어 계산"""
+        weights = {}
+        scores = {}
+
+        # 1. KB 매수우위지수 (0~200): 낮을수록 매수자 우세 → 과열
+        if "KB_매수우위지수" in df_yr.columns:
+            vals = df_yr["KB_매수우위지수"].dropna()
+            if not vals.empty:
+                mean_val = vals.mean()
+                # 반전: 높으면(매도자우세) 침체, 낮으면(매수자우세) 과열
+                # 정규화: 0=침체(val=200), 100=과열(val=0)
+                scores["KB_매수우위"] = max(0, min(100, (200 - mean_val) / 200 * 100))
+                weights["KB_매수우위"] = 0.25
+
+        # 2. 주택가격전망CSI (0~200): 높을수록 상승기대 → 과열
+        if "주택가격전망CSI" in df_yr.columns:
+            vals = df_yr["주택가격전망CSI"].dropna()
+            if not vals.empty:
+                mean_val = vals.mean()
+                scores["CSI"] = max(0, min(100, mean_val / 200 * 100))
+                weights["CSI"] = 0.20
+
+        # 3. 가격변화율_YoY (%): clamp(-20~+20) → 0~100
+        if "가격변화율_YoY" in df_yr.columns:
+            vals = df_yr["가격변화율_YoY"].dropna()
+            if not vals.empty:
+                mean_val = vals.mean()
+                clamped = max(-20, min(20, mean_val))
+                scores["가격변화율"] = (clamped + 20) / 40 * 100
+                weights["가격변화율"] = 0.25
+
+        # 4. 거래회전율 (있으면 매매거래량 사용): min-max 정규화
+        turnover_col = next((c for c in ["거래회전율", "매매_거래량", "거래량"] if c in df_yr.columns), None)
+        if turnover_col:
+            vals = df_yr[turnover_col].dropna()
+            if len(vals) >= 2:
+                v_min, v_max = vals.min(), vals.max()
+                if v_max > v_min:
+                    mean_val = vals.mean()
+                    scores["거래회전율"] = (mean_val - v_min) / (v_max - v_min) * 100
+                    weights["거래회전율"] = 0.15
+
+        # 5. 미분양_호수: 반전 정규화 (적을수록 과열)
+        if "미분양_호수" in df_yr.columns:
+            vals = df_yr["미분양_호수"].dropna()
+            if len(vals) >= 2:
+                v_min, v_max = vals.min(), vals.max()
+                if v_max > v_min:
+                    mean_val = vals.mean()
+                    # 반전: 미분양 적을수록(=min에 가까울수록) 과열 → 100
+                    scores["미분양"] = (v_max - mean_val) / (v_max - v_min) * 100
+                    weights["미분양"] = 0.15
+
+        if not weights:
+            return 50.0, {}
+
+        # 가중치 재배분 (누락 지표 제외)
+        total_weight = sum(weights.values())
+        final_score = sum(scores[k] * weights[k] for k in scores) / total_weight
+        breakdown = {k: round(scores[k], 2) for k in scores}
+        return round(final_score, 2), breakdown
+
+    if analysis_df.empty:
+        return 50.0, 0.0, {}
+
+    # 최신 연도
+    year_col = "연도" if "연도" in analysis_df.columns else None
+    if year_col is None:
+        return 50.0, 0.0, {}
+
+    latest_year = int(analysis_df[year_col].max())
+    df_latest = analysis_df[analysis_df[year_col] == latest_year]
+    score, breakdown = _calc_score(df_latest)
+
+    # 전년도 delta
+    df_prev = analysis_df[analysis_df[year_col] == latest_year - 1]
+    if not df_prev.empty:
+        prev_score, _ = _calc_score(df_prev)
+        delta = round(score - prev_score, 2)
+    else:
+        delta = 0.0
+
+    return score, delta, breakdown
+
+
+# ── 소득5분위 → 퍼센타일 보간 ─────────────────────────────────────────────
+
+def interpolate_quintile_to_percentile(quintile_df, year, columns=None):
+    """
+    KOSIS 소득5분위 데이터를 1% 단위(1~99)로 PCHIP 보간
+
+    Args:
+        quintile_df: DataFrame [연도, 소득분위, 가구_자산평균, 가구_부채평균, ...]
+        year: 보간 대상 연도
+        columns: 보간할 컬럼 리스트. None이면 숫자형 컬럼 전부.
+
+    Returns:
+        DataFrame [percentile(1~99), 각 컬럼 보간값]
+    """
+    if not HAS_SCIPY_INTERP:
+        raise ImportError("scipy.interpolate가 설치되어 있지 않습니다. pip install scipy")
+
+    if quintile_df.empty:
+        return pd.DataFrame()
+
+    # 해당 연도, "전체" 제외한 5개 분위 추출
+    year_col = "연도" if "연도" in quintile_df.columns else quintile_df.columns[0]
+    quintile_col = "소득분위" if "소득분위" in quintile_df.columns else quintile_df.columns[1]
+
+    df_yr = quintile_df[quintile_df[year_col] == year].copy()
+    # "전체" 등 비분위 행 제거
+    df_yr = df_yr[~df_yr[quintile_col].astype(str).str.contains("전체|평균|합계", na=False)]
+
+    if len(df_yr) == 0:
+        return pd.DataFrame()
+
+    # 소득분위 숫자 추출 (1~5분위)
+    df_yr["_분위_num"] = df_yr[quintile_col].astype(str).str.extract(r"(\d)").astype(float)
+    df_yr = df_yr.dropna(subset=["_분위_num"]).sort_values("_분위_num").reset_index(drop=True)
+
+    # 대표 퍼센타일 매핑
+    quintile_percentiles = {1: 10, 2: 30, 3: 50, 4: 70, 5: 90}
+    df_yr["_pct"] = df_yr["_분위_num"].map(quintile_percentiles)
+    df_yr = df_yr.dropna(subset=["_pct"])
+
+    if len(df_yr) < 3:
+        return pd.DataFrame()
+
+    # 보간 대상 컬럼 결정
+    if columns is None:
+        columns = [c for c in df_yr.select_dtypes(include=[np.number]).columns
+                   if c not in [year_col, "_분위_num", "_pct"]]
+
+    x_known = df_yr["_pct"].values
+    target_pct = np.arange(1, 100)  # 1~99
+    result = {"percentile": target_pct}
+
+    for col in columns:
+        if col not in df_yr.columns:
+            continue
+        y_known = df_yr[col].values.astype(float)
+        # 결측치가 있으면 해당 포인트 제외
+        valid_mask = ~np.isnan(y_known)
+        if valid_mask.sum() < 3:
+            result[col] = np.full(len(target_pct), np.nan)
+            continue
+        interp_fn = PchipInterpolator(x_known[valid_mask], y_known[valid_mask])
+        y_interp = interp_fn(target_pct)
+        # 음수 클램핑 (자산/소득은 음수 불가)
+        y_interp = np.maximum(y_interp, 0)
+        result[col] = y_interp
+
+    return pd.DataFrame(result)
+
+
+# ── 퍼센타일별 구매력 계산 ─────────────────────────────────────────────────
+
+def compute_purchasing_power(percentile_df, base_rate=3.5, dsr_limit=0.40, loan_years=30):
+    """
+    퍼센타일별 구매력(구매가능가격) 계산
+
+    Args:
+        percentile_df: interpolate_quintile_to_percentile() 결과
+        base_rate: 대출 금리 (%, 예: 3.5)
+        dsr_limit: DSR 한도 (0~1, 예: 0.40)
+        loan_years: 대출 기간 (년)
+
+    Returns:
+        DataFrame [percentile, 순자산, 연소득, 대출가능액, 구매력(만원)]
+    """
+    if percentile_df.empty:
+        return pd.DataFrame()
+
+    df = percentile_df.copy()
+
+    # 순자산 계산
+    if "가구_순자산" in df.columns:
+        df["순자산"] = df["가구_순자산"]
+    elif "가구_자산평균" in df.columns and "가구_부채평균" in df.columns:
+        df["순자산"] = df["가구_자산평균"] - df["가구_부채평균"]
+    else:
+        df["순자산"] = 0.0
+
+    # 연소득
+    income_col = next((c for c in ["가구_소득평균", "가구소득평균", "소득평균"] if c in df.columns), None)
+    df["연소득"] = df[income_col] if income_col else 0.0
+
+    # 현재 DSR (이미 % 저장 가정 → 0~1로 변환)
+    dsr_col = next((c for c in ["DSR", "부채상환비율", "가구_DSR"] if c in df.columns), None)
+    if dsr_col:
+        current_dsr = df[dsr_col] / 100.0
+    else:
+        current_dsr = pd.Series(0.0, index=df.index)
+
+    # 여유 DSR
+    slack_dsr = (dsr_limit - current_dsr).clip(lower=0)
+
+    # 연 상환 가능액 (만원)
+    annual_repayment = df["연소득"] * slack_dsr
+
+    # 대출가능액 계산 (원리금균등상환, 단위: 만원)
+    monthly_rate = base_rate / 100 / 12
+    n_payments = loan_years * 12
+    if monthly_rate > 0:
+        # PV = PMT * [1 - (1+r)^(-n)] / r
+        loan_possible = (annual_repayment / 12) * (1 - (1 + monthly_rate) ** (-n_payments)) / monthly_rate
+    else:
+        loan_possible = annual_repayment * loan_years
+
+    df["대출가능액"] = loan_possible.fillna(0)
+    df["구매력(만원)"] = (df["순자산"] + df["대출가능액"]).clip(lower=0)
+
+    result_cols = ["percentile", "순자산", "연소득", "대출가능액", "구매력(만원)"]
+    return df[[c for c in result_cols if c in df.columns]].reset_index(drop=True)
+
+
+# ── 시군구 급지 순위 ───────────────────────────────────────────────────────
+
+def rank_sigungu_grade(apt_df, nps_df, nts_df=None, year=None):
+    """
+    시군구 급지 순위 산출
+
+    Args:
+        apt_df, nps_df, nts_df: 데이터프레임
+        year: 기준 연도
+
+    Returns:
+        DataFrame [지역코드, 시군구명, 시도, 급지순위, 급지스코어,
+                   평균단가, 소득수준, 거래량, 3yr성장률]
+    """
+    from data_loader import get_sigungu_name
+
+    if year is None:
+        year = int(apt_df["연도"].max())
+
+    # ── 매매 집계 (해당 연도)
+    apt_yr = apt_df[apt_df["연도"] == year].copy()
+    agg = (
+        apt_yr.groupby(["지역코드", "시도"], as_index=False)
+        .agg(평균단가=("평균단가_per_m2", "mean"), 거래량=("거래량", "sum"), 평균가격=("평균가격", "mean"))
+    )
+
+    # ── NPS 소득 집계
+    nps_col_year = "연도" if "연도" in nps_df.columns else None
+    nps_col_amount = "NPS_1인당고지금액" if "NPS_1인당고지금액" in nps_df.columns else None
+    nps_col_sub = "NPS_가입자수" if "NPS_가입자수" in nps_df.columns else None
+
+    if nps_col_year and nps_col_amount and nps_col_sub:
+        nps_yr = nps_df[nps_df[nps_col_year] == year].copy()
+        nps_yr = nps_yr.dropna(subset=[nps_col_amount, nps_col_sub])
+        nps_yr["_w"] = nps_yr[nps_col_amount] * nps_yr[nps_col_sub]
+        nps_agg = nps_yr.groupby("지역코드", as_index=False).agg(
+            _w_sum=("_w", "sum"), _sub_sum=(nps_col_sub, "sum")
+        )
+        nps_agg["소득수준"] = np.where(
+            nps_agg["_sub_sum"] > 0, nps_agg["_w_sum"] / nps_agg["_sub_sum"], np.nan
+        )
+        agg = agg.merge(nps_agg[["지역코드", "소득수준"]], on="지역코드", how="left")
+    elif nts_df is not None and "1인당총급여_백만원" in nts_df.columns:
+        # NPS 없으면 NTS 소득 사용
+        nts_yr = nts_df[nts_df["연도"] == year].copy() if "연도" in nts_df.columns else pd.DataFrame()
+        if not nts_yr.empty:
+            nts_agg = nts_yr.groupby("지역코드", as_index=False).agg(소득수준=("1인당총급여_백만원", "mean"))
+            agg = agg.merge(nts_agg, on="지역코드", how="left")
+        else:
+            agg["소득수준"] = np.nan
+    else:
+        agg["소득수준"] = np.nan
+
+    # ── 3년 성장률
+    apt_3yr_ago = apt_df[apt_df["연도"] == year - 3].copy()
+    if not apt_3yr_ago.empty:
+        apt_3yr_agg = apt_3yr_ago.groupby("지역코드", as_index=False).agg(평균가격_3yr=("평균가격", "mean"))
+        agg = agg.merge(apt_3yr_agg, on="지역코드", how="left")
+        agg["3yr성장률"] = np.where(
+            agg["평균가격_3yr"] > 0,
+            (agg["평균가격"] - agg["평균가격_3yr"]) / agg["평균가격_3yr"] * 100,
+            np.nan,
+        )
+    else:
+        agg["3yr성장률"] = np.nan
+
+    # ── 전국 min-max 정규화
+    def minmax_norm(series):
+        v_min, v_max = series.min(), series.max()
+        if v_max == v_min:
+            return pd.Series(0.5, index=series.index)
+        return (series - v_min) / (v_max - v_min)
+
+    agg["단가_norm"] = minmax_norm(agg["평균단가"].fillna(agg["평균단가"].median()))
+    agg["소득_norm"] = minmax_norm(agg["소득수준"].fillna(agg["소득수준"].median()))
+    agg["거래량_norm"] = minmax_norm(agg["거래량"].fillna(0))
+    agg["성장률_norm"] = minmax_norm(agg["3yr성장률"].fillna(agg["3yr성장률"].median()))
+
+    # 급지스코어
+    agg["급지스코어"] = (
+        0.40 * agg["단가_norm"]
+        + 0.25 * agg["소득_norm"]
+        + 0.20 * agg["거래량_norm"]
+        + 0.15 * agg["성장률_norm"]
+    )
+
+    agg = agg.sort_values("급지스코어", ascending=False).reset_index(drop=True)
+    agg["급지순위"] = agg.index + 1
+    agg["시군구명"] = agg["지역코드"].apply(get_sigungu_name)
+
+    result_cols = ["지역코드", "시군구명", "시도", "급지순위", "급지스코어", "평균단가", "소득수준", "거래량", "3yr성장률"]
+    return agg[[c for c in result_cols if c in agg.columns]].reset_index(drop=True)
+
+
+# ── 소득 퍼센타일 → 시군구 급지 매칭 ─────────────────────────────────────
+
+def match_income_to_property(purchasing_power_df, grade_df):
+    """
+    소득 퍼센타일 → 시군구 급지 매칭
+
+    Args:
+        purchasing_power_df: compute_purchasing_power() 결과
+        grade_df: rank_sigungu_grade() 결과
+
+    Returns:
+        DataFrame [percentile_group, 구매력_대표, 매칭급지순위, 매칭시군구목록, 시장가격, 갭]
+    """
+    if purchasing_power_df.empty or grade_df.empty:
+        return pd.DataFrame()
+
+    # grade_df를 급지순위 오름차순 정렬 (1 = 최고급지)
+    grade_sorted = grade_df.sort_values("급지순위").reset_index(drop=True)
+
+    # apt 가격 컬럼 확인 (rank_sigungu_grade에서 평균가격 보존 여부 체크)
+    price_col = next((c for c in ["평균가격", "평균단가"] if c in grade_sorted.columns), None)
+
+    results = []
+    # 10% 구간별 그룹핑
+    bins = list(range(1, 100, 10)) + [100]
+    labels = [f"{b}~{min(b+9, 99)}%" for b in bins[:-1]]
+
+    for i, (lo, hi) in enumerate(zip(bins[:-1], bins[1:])):
+        grp = purchasing_power_df[
+            (purchasing_power_df["percentile"] >= lo) &
+            (purchasing_power_df["percentile"] < hi)
+        ]
+        if grp.empty:
+            continue
+
+        rep_power = grp["구매력(만원)"].median()
+
+        # 구매력으로 살 수 있는 시군구 (평균가격 <= 구매력)
+        if price_col:
+            affordable = grade_sorted[grade_sorted[price_col] <= rep_power]
+        else:
+            affordable = pd.DataFrame()
+
+        if not affordable.empty:
+            best_grade = int(affordable["급지순위"].min())
+            sigungu_list = affordable[affordable["급지순위"] == best_grade]["시군구명"].tolist()
+            market_price = affordable.loc[affordable["급지순위"] == best_grade, price_col].median() if price_col else np.nan
+            gap = rep_power - market_price if not np.isnan(market_price) else np.nan
+        else:
+            best_grade = None
+            sigungu_list = []
+            market_price = np.nan
+            gap = np.nan
+
+        results.append({
+            "percentile_group": labels[i],
+            "구매력_대표(만원)": round(rep_power, 0),
+            "매칭급지순위": best_grade,
+            "매칭시군구목록": ", ".join(sigungu_list[:5]) if sigungu_list else "구매불가",
+            "시장가격_중앙값(만원)": round(market_price, 0) if not np.isnan(market_price) else None,
+            "갭(만원)": round(gap, 0) if gap is not None and not np.isnan(gap) else None,
+        })
+
+    return pd.DataFrame(results)
