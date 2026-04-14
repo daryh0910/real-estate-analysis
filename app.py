@@ -1844,9 +1844,209 @@ with sub_granger:
 
 
 # ============================
-# Tab 8: 커뮤니티 게시판
+# Tab 8: 소득-매물 매칭
 # ============================
 with main_tab8:
+    st.header("소득-매물 매칭 분석")
+    st.caption("소득분위별 구매력을 계산하고, 시군구 급지순위와 매칭합니다.")
+
+    # ── 파라미터 섹션 ──────────────────────────────────────────────────
+    _pm_c1, _pm_c2, _pm_c3, _pm_c4 = st.columns(4)
+
+    with _pm_c1:
+        # quintile_df의 연도 목록에서 기준연도 선택
+        if not quintile_df.empty and "연도" in quintile_df.columns:
+            _q_years = sorted(quintile_df["연도"].dropna().unique().tolist(), reverse=True)
+        elif not apt_df.empty and "연도" in apt_df.columns:
+            _q_years = sorted(apt_df["연도"].dropna().unique().tolist(), reverse=True)
+        else:
+            _q_years = [2023, 2022, 2021]
+        _match_year = st.selectbox("기준연도", _q_years, key="match_year")
+
+    with _pm_c2:
+        _base_rate = st.number_input("대출금리 (%)", min_value=0.5, max_value=20.0, value=3.5, step=0.1, key="match_rate")
+
+    with _pm_c3:
+        _dsr_pct = st.selectbox("DSR 한도", [40, 50], index=0, key="match_dsr")
+        _dsr_limit = _dsr_pct / 100.0
+
+    with _pm_c4:
+        _loan_years = st.selectbox("대출기간 (년)", [20, 25, 30], index=2, key="match_loan_years")
+
+    st.divider()
+
+    # ── 결과 1: 소득분위별 구매력 ──────────────────────────────────────
+    st.subheader("퍼센타일별 구매력")
+    try:
+        # 보간 → 구매력 계산
+        _pct_df = interpolate_quintile_to_percentile(quintile_df, year=_match_year)
+        _pp_df  = compute_purchasing_power(
+            _pct_df,
+            base_rate=_base_rate,
+            dsr_limit=_dsr_limit,
+            loan_years=_loan_years,
+        )
+
+        if _pp_df.empty:
+            st.warning("구매력 계산 결과가 없습니다. quintile 데이터를 확인하세요.")
+        else:
+            # 구매력 분포 면적 차트
+            _pp_col = next((c for c in ["구매력", "대출가능액"] if c in _pp_df.columns), None)
+            _pct_col = "percentile" if "percentile" in _pp_df.columns else _pp_df.columns[0]
+
+            if _pp_col:
+                fig_pp = px.area(
+                    _pp_df,
+                    x=_pct_col, y=_pp_col,
+                    title=f"소득분위별 구매력 분포 ({_match_year}년, 금리 {_base_rate}%, DSR {_dsr_pct}%, {_loan_years}년)",
+                    labels={_pct_col: "소득 퍼센타일 (%)", _pp_col: "구매력(만원)"},
+                    color_discrete_sequence=["#3498db"],
+                )
+                # 핵심 구간 annotation (상위 1%, 5%, 10%, 50%)
+                for _ann_pct in [1, 5, 10, 50]:
+                    _ann_row = _pp_df[_pp_df[_pct_col] == _ann_pct]
+                    if not _ann_row.empty:
+                        _ann_val = float(_ann_row[_pp_col].iloc[0])
+                        fig_pp.add_vline(
+                            x=_ann_pct, line_dash="dot", line_color="gray",
+                            annotation_text=f"상위{_ann_pct}%\n{_ann_val:,.0f}만",
+                            annotation_position="top",
+                            annotation_font_size=9,
+                        )
+                fig_pp.update_layout(height=380)
+                register_fig("소득분위_구매력", fig_pp, "소득-매물 매칭")
+                st.plotly_chart(fig_pp, use_container_width=True)
+
+            # 주요 퍼센타일 테이블
+            _pp_disp_cols = [c for c in [_pct_col, "순자산", "연소득", "대출가능액", "구매력"] if c in _pp_df.columns]
+            st.dataframe(
+                _pp_df[_pp_disp_cols].style.format({c: "{:,.0f}" for c in _pp_disp_cols if c != _pct_col}, na_rep="N/A"),
+                use_container_width=True, height=280,
+            )
+    except Exception as e:
+        st.error(f"구매력 계산 오류: {e}")
+
+    st.divider()
+
+    # ── 결과 2: 급지 순위 ─────────────────────────────────────────────
+    st.subheader("시군구 급지 순위")
+    try:
+        _grade_df = _cached_rank_sigungu(apt_df, nps_df, _match_year)
+
+        if _grade_df.empty:
+            st.warning("급지 순위 계산 결과가 없습니다. apt/nps 데이터를 확인하세요.")
+        else:
+            # 상위 30개 수평 막대
+            _gd_top = _grade_df.head(30).copy()
+            _gd_name_col = "시군구명" if "시군구명" in _gd_top.columns else "지역코드"
+            _gd_score_col = "급지스코어" if "급지스코어" in _gd_top.columns else "급지순위"
+            _gd_color_col = "급지스코어" if "급지스코어" in _gd_top.columns else None
+
+            _gd_top["표시명"] = _gd_top.apply(
+                lambda r: f"{r.get('시군구명', r.get('지역코드',''))}" +
+                          (f" ({r['시도']})" if "시도" in r and pd.notna(r.get("시도")) else ""),
+                axis=1
+            )
+            fig_grade = px.bar(
+                _gd_top,
+                x=_gd_score_col, y="표시명",
+                orientation="h",
+                color=_gd_color_col,
+                color_continuous_scale="RdYlGn",
+                title=f"시군구 급지 순위 TOP 30 ({_match_year}년)",
+                labels={_gd_score_col: "급지스코어", "표시명": ""},
+            )
+            fig_grade.update_layout(
+                height=500, margin=dict(t=40, b=20, l=10, r=20),
+                yaxis=dict(autorange="reversed"),
+            )
+            register_fig("급지순위_TOP30", fig_grade, "소득-매물 매칭")
+            st.plotly_chart(fig_grade, use_container_width=True)
+
+            with st.expander("전체 급지 테이블"):
+                _gd_disp = [c for c in ["급지순위", "시군구명", "시도", "급지스코어", "평균단가", "소득수준", "거래량", "성장률_3yr"] if c in _grade_df.columns]
+                st.dataframe(_grade_df[_gd_disp], use_container_width=True, height=400)
+    except Exception as e:
+        st.error(f"급지순위 계산 오류: {e}")
+
+    st.divider()
+
+    # ── 결과 3: 소득-급지 매칭 ────────────────────────────────────────
+    st.subheader("소득-급지 매칭")
+    try:
+        # 구매력 df와 급지 df가 모두 있을 때만 매칭
+        if "_pp_df" in dir() and not _pp_df.empty and "_grade_df" in dir() and not _grade_df.empty:
+            _match_df = match_income_to_property(_pp_df, _grade_df)
+
+            if _match_df.empty:
+                st.info("매칭 결과가 없습니다.")
+            else:
+                # 매칭 테이블
+                _mt_disp_cols = [c for c in [
+                    "percentile_구간", "구매력_중앙", "매칭최고급지", "매칭시군구_TOP3", "시장가격", "갭"
+                ] if c in _match_df.columns]
+
+                st.dataframe(
+                    _match_df[_mt_disp_cols].style.format(
+                        {c: "{:,.0f}" for c in ["구매력_중앙", "시장가격", "갭"] if c in _match_df.columns},
+                        na_rep="N/A",
+                    ),
+                    use_container_width=True,
+                    height=320,
+                    column_config={
+                        "매칭시군구_TOP3": st.column_config.TextColumn("추천 시군구 TOP3", width="large"),
+                        "갭": st.column_config.NumberColumn("갭(만원)", help="시장가격 - 구매력 (음수=살 수 있음)"),
+                    },
+                )
+
+                # 계단 차트: 구매력 곡선 vs 급지별 시장가격 오버레이
+                _pct_col2 = "percentile" if "percentile" in _pp_df.columns else _pp_df.columns[0]
+                _pp_col2  = next((c for c in ["구매력", "대출가능액"] if c in _pp_df.columns), None)
+                _mkt_col  = "시장가격" if "시장가격" in _match_df.columns else None
+                _pct_interval_col = "percentile_구간" if "percentile_구간" in _match_df.columns else None
+
+                if _pp_col2 and _mkt_col and _pct_interval_col:
+                    fig_match = go.Figure()
+                    # 구매력 곡선
+                    fig_match.add_trace(go.Scatter(
+                        x=_pp_df[_pct_col2], y=_pp_df[_pp_col2],
+                        mode="lines",
+                        name="구매력",
+                        line=dict(color="#3498db", width=2),
+                        fill="tozeroy", fillcolor="rgba(52,152,219,0.1)",
+                    ))
+                    # 급지별 시장가격 (계단형)
+                    fig_match.add_trace(go.Scatter(
+                        x=_match_df[_pct_interval_col], y=_match_df[_mkt_col],
+                        mode="lines+markers",
+                        name="급지별 시장가격",
+                        line=dict(color="#e74c3c", width=2, shape="hv"),
+                        marker=dict(size=6),
+                    ))
+                    fig_match.update_layout(
+                        title="소득 퍼센타일별 구매력 vs 급지 시장가격",
+                        xaxis_title="소득 퍼센타일 (%)",
+                        yaxis_title="금액(만원)",
+                        height=420,
+                        legend=dict(orientation="h"),
+                        annotations=[dict(
+                            text="두 곡선이 만나는 구간 = 해당 소득수준에서 접근 가능한 시장",
+                            showarrow=False, x=0.5, y=1.06, xref="paper", yref="paper",
+                            font=dict(size=10, color="gray"),
+                        )],
+                    )
+                    register_fig("소득_급지_매칭_차트", fig_match, "소득-매물 매칭")
+                    st.plotly_chart(fig_match, use_container_width=True)
+        else:
+            st.info("구매력 및 급지 데이터가 모두 계산되어야 매칭이 가능합니다.")
+    except Exception as e:
+        st.error(f"소득-급지 매칭 오류: {e}")
+
+
+# ============================
+# Tab 9: 커뮤니티 게시판
+# ============================
+with main_tab9:
     st.header("커뮤니티 게시판")
     st.caption("차트와 분석 설정을 저장하고 다른 사용자와 공유합니다.")
 
