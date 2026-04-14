@@ -1422,6 +1422,7 @@ def load_all_data(force_rebuild=False):
         "csi": csi_df,
         "kb": kb_df,
         "policy_events": load_policy_events(),
+        "quintile": quintile_df,
         "yearly": yearly,
         "monthly": monthly,
     }
