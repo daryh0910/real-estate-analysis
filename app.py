@@ -43,12 +43,16 @@ st.set_page_config(
     layout="wide",
 )
 
+# Streamlit Cloud (Linux) 한글 폰트 기본값 — packages.txt에 fonts-noto-cjk 설치 필요
+PLOTLY_FONT = dict(family="Noto Sans KR, Noto Sans CJK KR, sans-serif", size=12)
+
 
 def register_fig(name: str, fig, tab_name: str):
-    """Plotly figure를 게시판 저장용으로 등록"""
+    """Plotly figure를 게시판 저장용으로 등록하고 한글 폰트를 일괄 적용"""
     if "_board_figures" not in st.session_state:
         st.session_state["_board_figures"] = {}
     st.session_state["_board_figures"][name] = {"fig": fig, "tab_name": tab_name}
+    fig.update_layout(font=PLOTLY_FONT)
 
 # --- 데이터 로딩 (캐싱) ---
 @st.cache_data(show_spinner=False)
