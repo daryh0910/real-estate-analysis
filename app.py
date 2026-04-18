@@ -2036,15 +2036,20 @@ with main_tab8:
                 marker=dict(size=5),
             ))
 
-        # 예측 시작점 수직선 (Timestamp → str 변환: Plotly sum() 내부 TypeError 방지)
+        # 예측 시작점 수직선 — add_vline annotation이 Python 3.14+에서 sum(str) TypeError 유발
+        # add_shape + add_annotation으로 분리하여 우회
         _last_date = _fc_actual["ds"].max()
         _vline_x = _last_date.strftime("%Y-%m-%d") if hasattr(_last_date, "strftime") else str(_last_date)
-        _fc_fig.add_vline(
-            x=_vline_x,
-            line_dash="dash",
-            line_color="gray",
-            annotation_text="예측 시작",
-            annotation_position="top right",
+        _fc_fig.add_shape(
+            type="line",
+            x0=_vline_x, x1=_vline_x,
+            y0=0, y1=1, yref="paper",
+            line=dict(dash="dash", color="gray", width=1),
+        )
+        _fc_fig.add_annotation(
+            x=_vline_x, y=1.02, yref="paper",
+            text="예측 시작", showarrow=False,
+            xanchor="left", font=dict(size=11, color="gray"),
         )
 
         _fc_fig.update_layout(
