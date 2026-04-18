@@ -805,9 +805,10 @@ with sub_ts:
             if show_policy and not policy_events_df.empty:
                 colors = {"규제강화": "red", "규제완화": "green", "중립": "gray"}
                 for _, ev in policy_events_df.iterrows():
-                    x_val = ev["날짜"]
                     if time_col == "연도":
                         x_val = ev["날짜"].year
+                    else:
+                        x_val = ev["날짜"].strftime("%Y-%m-%d") if hasattr(ev["날짜"], "strftime") else str(ev["날짜"])
                     fig_dual.add_vline(
                         x=x_val, line_width=1, line_dash="dot",
                         line_color=colors.get(ev.get("방향", ""), "gray"),
