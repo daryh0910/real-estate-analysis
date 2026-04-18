@@ -1318,7 +1318,15 @@ with main_tab4:
                         sep = " " if cur and not cur.endswith(" ") else ""
                         st.session_state[ta_key] = cur + sep + sel_var
 
-                # ② 연산자 단축 버튼
+                # ② 프리셋 수식 템플릿
+                st.caption("수식 템플릿:")
+                _p_cols = st.columns(len(PRESETS_5))
+                for _pi, (_plbl, _pexpr, _punit) in enumerate(PRESETS_5):
+                    if _p_cols[_pi].button(_plbl, key=f"f5_preset_{i}_{_pi}", use_container_width=True):
+                        st.session_state[ta_key] = _pexpr
+                        st.session_state[f"f5_unit_{i}"] = _punit
+
+                # ③ 연산자 단축 버튼
                 st.caption("연산자 빠른 삽입:")
                 op_cols = st.columns(7)
                 for _j, (_lbl, _val) in enumerate([
