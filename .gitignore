@@ -28,6 +28,7 @@ Thumbs.db
 # 세션 로그/문서
 *.txt
 !requirements.txt
+!packages.txt
 *.docx
 SPRINT_2_PLAN.md
 
