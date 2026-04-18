@@ -2035,10 +2035,11 @@ with main_tab8:
                 marker=dict(size=5),
             ))
 
-        # 예측 시작점 수직선
+        # 예측 시작점 수직선 (Timestamp → str 변환: Plotly sum() 내부 TypeError 방지)
         _last_date = _fc_actual["ds"].max()
+        _vline_x = _last_date.strftime("%Y-%m-%d") if hasattr(_last_date, "strftime") else str(_last_date)
         _fc_fig.add_vline(
-            x=_last_date,
+            x=_vline_x,
             line_dash="dash",
             line_color="gray",
             annotation_text="예측 시작",
