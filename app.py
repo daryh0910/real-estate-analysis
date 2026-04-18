@@ -495,8 +495,8 @@ with main_tab1:
                     with open(_geo_path, encoding="utf-8") as _gf:
                         _geojson = json.load(_gf)
 
-                    # 지역코드를 문자열 5자리로 정규화
-                    _map_df = _value_df.copy()
+                    # 지역코드를 문자열 5자리로 정규화 (NaN 행 제거 후 변환)
+                    _map_df = _value_df.dropna(subset=["지역코드"]).copy()
                     _map_df["지역코드"] = _map_df["지역코드"].astype(str).str.zfill(5)
 
                     # hover에 표시할 컬럼 선택 (없으면 제외)
