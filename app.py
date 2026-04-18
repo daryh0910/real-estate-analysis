@@ -1258,16 +1258,16 @@ with main_tab4:
                     cat_list = ["(전체)"] + sorted(VAR_META["카테고리"].unique().tolist())
                     sel_cat = st.selectbox("카테고리", cat_list, key=f"cat_{i}")
 
-                    # 2단계: 카테고리 필터 후 변수 선택
+                    # 2단계: 카테고리 필터
                     if sel_cat == "(전체)":
-                        filtered_meta = VAR_META[VAR_META["컬럼명"].isin(numeric_cols_5)]
+                        filtered_meta = VAR_META[VAR_META["컬럼명"].isin(numeric_cols_5)].copy()
                     else:
                         filtered_meta = VAR_META[
                             (VAR_META["카테고리"] == sel_cat) &
                             (VAR_META["컬럼명"].isin(numeric_cols_5))
-                        ]
+                        ].copy()
 
-                    # 메타에 없는 컬럼은 표시명=컬럼명으로 fallback
+                    # 메타에 없는 컬럼 fallback
                     meta_col_set = set(VAR_META["컬럼명"].tolist())
                     extra_cols = [c for c in numeric_cols_5 if c not in meta_col_set]
                     if sel_cat == "(전체)" and extra_cols:
@@ -1277,20 +1277,39 @@ with main_tab4:
                         ])
                         filtered_meta = pd.concat([filtered_meta, extra_rows], ignore_index=True)
 
-                    disp_names = filtered_meta["표시명"].tolist() if not filtered_meta.empty else numeric_cols_5
+                    # 검색창 (표시명·설명 키워드 필터)
+                    _srch = st.text_input(
+                        "변수 검색", placeholder="예: 인구, 금리, KB …",
+                        key=f"f5_search_{i}", label_visibility="collapsed",
+                    )
+                    if _srch.strip():
+                        _smask = filtered_meta["표시명"].str.contains(_srch, case=False, na=False)
+                        if "설명" in filtered_meta.columns:
+                            _smask |= filtered_meta["설명"].fillna("").str.contains(_srch, case=False, na=False)
+                        filtered_meta = filtered_meta[_smask]
+
+                    # [출처] 접두사 라벨 생성
+                    filtered_meta = filtered_meta.copy()
+                    filtered_meta["_라벨"] = filtered_meta.apply(
+                        lambda r: f"[{r['출처']}] {r['표시명']}" if str(r.get("출처", "-")) not in ("", "-") else r["표시명"],
+                        axis=1,
+                    )
+
+                    disp_labels = filtered_meta["_라벨"].tolist() if not filtered_meta.empty else numeric_cols_5
                     sel_disp = st.selectbox(
                         "변수 선택 후 [삽입] 클릭",
-                        disp_names,
+                        disp_labels,
                         key=f"f5_selvar_{i}",
                     )
-                    # 표시명 → 컬럼명 매핑
-                    _meta_match = filtered_meta[filtered_meta["표시명"] == sel_disp]
+                    # 라벨 → 컬럼명 매핑
+                    _meta_match = filtered_meta[filtered_meta["_라벨"] == sel_disp]
                     sel_var = _meta_match["컬럼명"].iloc[0] if not _meta_match.empty else sel_disp
 
-                    # 선택 변수의 출처/카테고리 표시
+                    # 선택 변수 설명 표시 (출처는 이미 라벨에 포함)
                     if not _meta_match.empty:
-                        _row = _meta_match.iloc[0]
-                        st.caption(f"출처: {_row.get('출처', '-')} | 카테고리: {_row.get('카테고리', '-')}")
+                        _desc = _meta_match.iloc[0].get("설명", "")
+                        if _desc:
+                            st.caption(_desc)
 
                 with col_ins:
                     st.write("")
