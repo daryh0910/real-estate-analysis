@@ -809,13 +809,19 @@ with sub_ts:
                         x_val = ev["날짜"].year
                     else:
                         x_val = ev["날짜"].strftime("%Y-%m-%d") if hasattr(ev["날짜"], "strftime") else str(ev["날짜"])
-                    fig_dual.add_vline(
-                        x=x_val, line_width=1, line_dash="dot",
-                        line_color=colors.get(ev.get("방향", ""), "gray"),
-                        annotation_text=ev.get("이벤트명", ""),
-                        annotation_position="top",
-                        annotation_font_size=8,
-                        annotation_textangle=-45,
+                    _ev_color = colors.get(ev.get("방향", ""), "gray")
+                    fig_dual.add_shape(
+                        type="line",
+                        x0=x_val, x1=x_val,
+                        y0=0, y1=1, yref="paper",
+                        line=dict(dash="dot", color=_ev_color, width=1),
+                    )
+                    fig_dual.add_annotation(
+                        x=x_val, y=1.0, yref="paper",
+                        text=ev.get("이벤트명", ""),
+                        showarrow=False, xanchor="right",
+                        font=dict(size=8, color=_ev_color),
+                        textangle=-45,
                     )
 
             register_fig("시계열_듀얼축", fig_dual, "시장분석")
