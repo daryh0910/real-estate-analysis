@@ -874,7 +874,7 @@ with sub_price_cmp:
         # 가격비교 변수 선택
         pc_vars = [v for v in result_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
         if pc_vars:
-            pc_var = st.selectbox("비교 변수", pc_vars, key="price_cmp_var")
+            pc_var = st.selectbox("비교 변수", pc_vars, key="price_cmp_var", format_func=_fmt_var_by_col)
             pc_time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
 
             # 시도별 가격 추이 라인 차트
