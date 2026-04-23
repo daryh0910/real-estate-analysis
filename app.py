@@ -1689,7 +1689,8 @@ with sub_reg:
             reg_x_candidates = [v for v in valid_num if v != reg_y]
             reg_x = st.multiselect("독립변수 (X)", reg_x_candidates,
                                     default=reg_x_candidates[:3] if len(reg_x_candidates) >= 3 else reg_x_candidates,
-                                    key="reg_x")
+                                    key="reg_x",
+                                    format_func=_fmt_var_by_col)
 
         if reg_x and reg_y:
             try:
