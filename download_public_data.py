@@ -571,98 +571,116 @@ def fetch_base_rate(start_ym="200001", end_ym="202612"):
 
 
 # ═══════════════════════════════════════════════════════
-# 4. 전월세전환율 (BOK ECOS API)
+# 4. 전월세전환율 (KOSIS 한국부동산원 API)
 # ═══════════════════════════════════════════════════════
 
-def fetch_jeonwolse_rate(start_ym="201201", end_ym="202602"):
+# KOSIS 한국부동산원 지역별 전월세전환율 (DT_30404_N0010)
+# C1: 00=종합, 01=아파트, 02=연립다세대, 03=단독주택
+# C2 시도급 코드 매핑
+_JEONWOLSE_SIDO_C2 = {
+    "a7": "서울", "a8": "부산", "a9": "대구", "a10": "인천",
+    "a11": "광주", "a12": "대전", "a13": "울산", "a14": "세종",
+    "a15": "경기", "a16": "강원", "a17": "충북", "a18": "충남",
+    "a19": "전북", "a20": "전남", "a21": "경북", "a22": "경남",
+    "a23": "제주",
+}
+_JEONWOLSE_KOSIS_URL = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
+
+
+def fetch_jeonwolse_rate(start_ym="201201", end_ym="202603"):
     """
-    BOK ECOS API → 시도별 전월세전환율
-    통계표: 901Y093 (주택유형별/지역별 전월세전환율)
+    KOSIS 한국부동산원 → 시도별 아파트 전월세전환율 (연이율 %)
+    통계표: DT_30404_N0010 (지역별 전월세전환율, orgId=408)
+    C1=01(아파트), C2=시도 17개
+    주의: 40,000셀 제한으로 연도별 분할 수집
     출력: {OUTPUT_DIR}/jeonwolse_conversion_rate_sido_monthly.csv
     """
     print("=" * 60)
-    print("[4] 전월세전환율 수집 (BOK)")
+    print("[4] 전월세전환율 수집 (KOSIS 한국부동산원 DT_30404_N0010)")
     print("=" * 60)
 
-    url = (
-        f"{BOK_BASE_URL}/StatisticSearch/{BOK_API_KEY}/json/kr/"
-        f"1/99999/901Y093/M/{start_ym}/{end_ym}/"
-    )
-
-    try:
-        resp = _api_get(url)
-        data = resp.json()
-    except Exception as e:
-        print(f"  API 요청 실패: {e}")
+    kosis_key = os.environ.get("KOSIS_API_KEY", "")
+    if not kosis_key:
+        print("  KOSIS_API_KEY 환경변수 없음")
         return None
 
-    if "StatisticSearch" not in data:
-        err_msg = data.get("RESULT", {}).get("MESSAGE", "알 수 없는 오류")
-        print(f"  API 오류: {err_msg}")
-        # 대체 통계코드 시도
-        return _fetch_jeonwolse_rate_alt(start_ym, end_ym)
+    sido_c2_codes = list(_JEONWOLSE_SIDO_C2.keys())  # a7 ~ a23
 
-    rows = data["StatisticSearch"]["row"]
-    print(f"  {len(rows)}행 수신")
+    start_year = int(start_ym[:4])
+    end_year = int(end_ym[:4])
 
     all_rows = []
-    for row in rows:
-        time_str = row.get("TIME", "") or ""
-        value_str = row.get("DATA_VALUE", "") or ""
-        item1 = (row.get("ITEM_NAME1") or "").strip()
-        item2 = (row.get("ITEM_NAME2") or "").strip()
-        item3 = (row.get("ITEM_NAME3") or "").strip()
 
-        if len(time_str) < 6:
-            continue
+    # 40,000셀 제한 → 연도별 분할 (17시도 × 12개월 = 204행/연도, 안전)
+    for year in range(start_year, end_year + 1):
+        y_start = f"{year}01"
+        y_end = f"{year}12" if year < end_year else end_ym[4:6] and f"{year}{end_ym[4:6]}"
+        # end_ym 파싱
+        if year == end_year:
+            y_end = end_ym  # YYYYMM 형식
 
-        ym = f"{time_str[:4]}-{time_str[4:6]}"
+        params = {
+            "method": "getList",
+            "apiKey": kosis_key,
+            "orgId": "408",
+            "tblId": "DT_30404_N0010",
+            "itmId": "ALL",
+            "objL1": "01",           # 아파트
+            "objL2": "a7",           # 서울 (단일 지역씩 수집)
+            "prdSe": "M",
+            "startPrdDe": y_start,
+            "endPrdDe": y_end,
+            "format": "json",
+            "jsonVD": "Y",
+        }
 
-        try:
-            val = float(value_str.replace(",", ""))
-        except (ValueError, AttributeError):
-            continue
+        # 시도별로 순회 (objL2 단일값 사용 — 쉼표 구분 지원 안 됨)
+        for c2, sido_name in _JEONWOLSE_SIDO_C2.items():
+            params["objL2"] = c2
+            try:
+                resp = _api_get(_JEONWOLSE_KOSIS_URL, params=params)
+                data = resp.json()
+            except Exception as e:
+                print(f"  {sido_name} {year} 요청 실패: {e}")
+                continue
 
-        # 지역명 / 주택유형 구분
-        sido = None
-        housing_type = "전체"
-        for item in [item1, item2, item3]:
-            normalized = _normalize_sido(item)
-            if normalized in SIDO_NORM.values():
-                sido = normalized
-            elif item in ("아파트", "단독주택", "연립다세대", "전체"):
-                housing_type = item
+            if not isinstance(data, list):
+                err_msg = data.get("errMsg", "") if isinstance(data, dict) else str(data)
+                if "데이터가 존재하지 않습니다" not in err_msg:
+                    print(f"  {sido_name} {year} 응답 오류: {err_msg}")
+                continue
 
-        if sido is None:
-            # 전국 포함
-            for item in [item1, item2, item3]:
-                if "전국" in item:
-                    sido = "전국"
-                    break
+            for row in data:
+                prd = row.get("PRD_DE", "")
+                val_str = row.get("DT", "")
+                c2_nm = row.get("C2_NM", sido_name)
 
-        all_rows.append({
-            "연월": ym,
-            "시도": sido,
-            "주택유형": housing_type,
-            "전월세전환율": val,
-        })
+                if len(prd) < 6:
+                    continue
+
+                try:
+                    val = float(val_str)
+                except (ValueError, TypeError):
+                    continue
+
+                ym = f"{prd[:4]}-{prd[4:6]}"
+                all_rows.append({
+                    "연월": ym,
+                    "시도": sido_name,
+                    "전월세전환율": val,
+                })
+
+            time.sleep(0.2)
+
+        if year % 3 == 0:
+            print(f"  {year}년 완료 (누적 {len(all_rows)}행)")
 
     if not all_rows:
-        print("  파싱 실패")
+        print("  KOSIS에서 데이터 없음")
         return None
 
-    df = pd.DataFrame(all_rows)
-    df = df.dropna(subset=["시도"])
-
-    # 아파트만 필터 (또는 전체)
-    apt_df = df[df["주택유형"] == "아파트"]
-    if apt_df.empty:
-        apt_df = df[df["주택유형"] == "전체"]
-    if apt_df.empty:
-        apt_df = df
-
-    result = apt_df[["연월", "시도", "전월세전환율"]].copy()
-    result = result[result["시도"] != "전국"]
+    result = pd.DataFrame(all_rows)
+    result = result.drop_duplicates(subset=["연월", "시도"])
     result["연도"] = result["연월"].str[:4].astype(int)
     result["월"] = result["연월"].str[5:7].astype(int)
     result = result.sort_values(["연월", "시도"]).reset_index(drop=True)
@@ -672,59 +690,10 @@ def fetch_jeonwolse_rate(start_ym="201201", end_ym="202602"):
     out_path = os.path.join(OUTPUT_DIR, "jeonwolse_conversion_rate_sido_monthly.csv")
     result.to_csv(out_path, index=False, encoding="utf-8-sig")
     print(f"  저장: {out_path}")
-    print(f"    행 수: {len(result):,}, 시도 수: {result['시도'].nunique()}")
+    print(f"    행 수: {len(result):,}, 시도 수: {result['시도'].nunique()}, "
+          f"기간: {result['연월'].min()} ~ {result['연월'].max()}")
 
     return result
-
-
-def _fetch_jeonwolse_rate_alt(start_ym, end_ym):
-    """대체: 다른 BOK 통계코드로 전월세전환율 시도"""
-    alt_codes = ["901Y093", "901Y067"]
-    for code in alt_codes:
-        url = (
-            f"{BOK_BASE_URL}/StatisticSearch/{BOK_API_KEY}/json/kr/"
-            f"1/99999/{code}/M/{start_ym}/{end_ym}/"
-        )
-        try:
-            resp = _api_get(url)
-            data = resp.json()
-            if "StatisticSearch" in data:
-                rows = data["StatisticSearch"]["row"]
-                print(f"  대체 코드 {code}: {len(rows)}행 수신")
-                # 간단히 저장
-                all_rows = []
-                for row in rows:
-                    time_str = row.get("TIME", "")
-                    val_str = row.get("DATA_VALUE", "")
-                    item1 = row.get("ITEM_NAME1", "").strip()
-                    if len(time_str) >= 6:
-                        ym = f"{time_str[:4]}-{time_str[4:6]}"
-                        try:
-                            val = float(val_str.replace(",", ""))
-                        except (ValueError, AttributeError):
-                            continue
-                        all_rows.append({
-                            "연월": ym,
-                            "시도": _normalize_sido(item1),
-                            "전월세전환율": val,
-                        })
-
-                if all_rows:
-                    result = pd.DataFrame(all_rows)
-                    result = result.dropna(subset=["시도"])
-                    result["연도"] = result["연월"].str[:4].astype(int)
-                    result["월"] = result["연월"].str[5:7].astype(int)
-
-                    os.makedirs(OUTPUT_DIR, exist_ok=True)
-                    out_path = os.path.join(OUTPUT_DIR, "jeonwolse_conversion_rate_sido_monthly.csv")
-                    result.to_csv(out_path, index=False, encoding="utf-8-sig")
-                    print(f"  저장: {out_path}")
-                    return result
-        except Exception:
-            continue
-
-    print("  전월세전환율 수집 실패")
-    return None
 
 
 # ═══════════════════════════════════════════════════════
