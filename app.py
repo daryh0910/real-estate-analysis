@@ -1641,7 +1641,7 @@ with main_tab5:
         if unsold_cols:
             unsold_time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
             # 시도별 미분양 시계열
-            unsold_var = st.selectbox("미분양 지표", unsold_cols, key="unsold_var")
+            unsold_var = st.selectbox("미분양 지표", unsold_cols, key="unsold_var", format_func=_fmt_var_by_col)
             unsold_df = analysis_df.groupby(["시도", unsold_time_col])[unsold_var].mean().reset_index()
             fig_unsold = px.line(
                 unsold_df.sort_values(unsold_time_col),
