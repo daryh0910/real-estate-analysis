@@ -1801,9 +1801,9 @@ with sub_corr:
         col_a, col_b = st.columns(2)
         with col_a:
             default_x = valid_vars.index("GRDP") if "GRDP" in valid_vars else 0
-            x_var = st.selectbox("X축 변수", valid_vars, index=default_x, key="corr_x_var")
+            x_var = st.selectbox("X축 변수", valid_vars, index=default_x, key="corr_x_var", format_func=_fmt_var_by_col)
         with col_b:
-            y_var = st.selectbox("Y축 변수", valid_vars, index=0, key="corr_y_var")
+            y_var = st.selectbox("Y축 변수", valid_vars, index=0, key="corr_y_var", format_func=_fmt_var_by_col)
 
         scatter_df, slope, intercept, r_sq = scatter_analysis(analysis_df, x_var, y_var)
         if not scatter_df.empty:
