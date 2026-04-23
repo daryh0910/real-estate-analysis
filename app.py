@@ -1939,7 +1939,7 @@ with sub_granger:
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            g_y = st.selectbox("결과변수 (Y)", [v for v in result_vars if v in valid_num_g], key="g_y")
+            g_y = st.selectbox("결과변수 (Y)", [v for v in result_vars if v in valid_num_g], key="g_y", format_func=_fmt_var_by_col)
         with col2:
             g_x_candidates = [v for v in valid_num_g if v != g_y]
             g_x = st.selectbox("원인변수 (X)", g_x_candidates, key="g_x")
