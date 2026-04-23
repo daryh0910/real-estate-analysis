@@ -1942,7 +1942,7 @@ with sub_granger:
             g_y = st.selectbox("결과변수 (Y)", [v for v in result_vars if v in valid_num_g], key="g_y", format_func=_fmt_var_by_col)
         with col2:
             g_x_candidates = [v for v in valid_num_g if v != g_y]
-            g_x = st.selectbox("원인변수 (X)", g_x_candidates, key="g_x")
+            g_x = st.selectbox("원인변수 (X)", g_x_candidates, key="g_x", format_func=_fmt_var_by_col)
         with col3:
             g_max_lag = st.slider("최대 시차 (개월)", 1, 12, 4, key="g_lag")
 
