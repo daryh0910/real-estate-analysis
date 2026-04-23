@@ -975,6 +975,45 @@ def load_construction_data():
     return df
 
 
+def load_m2_data():
+    """M2 광의통화 로드 (전국, 월별). Returns: DataFrame [연월, M2잔액, M2_YoY, 연도, 월]"""
+    if not os.path.exists(M2_PATH):
+        return pd.DataFrame()
+    return pd.read_csv(M2_PATH)
+
+
+def load_spread_data():
+    """예대금리차 로드 (전국, 월별). Returns: DataFrame [연월, 예금금리, 대출금리, 예대금리차, 연도, 월]"""
+    if not os.path.exists(SPREAD_PATH):
+        return pd.DataFrame()
+    return pd.read_csv(SPREAD_PATH)
+
+
+def load_household_credit_data():
+    """가계신용잔액+연체율 로드 (전국, 월별). Returns: DataFrame [연월, 가계신용잔액, 가계대출연체율, 연도, 월]"""
+    if not os.path.exists(HOUSEHOLD_CREDIT_PATH):
+        return pd.DataFrame()
+    return pd.read_csv(HOUSEHOLD_CREDIT_PATH)
+
+
+def load_krihs_sentiment_data():
+    """KRIHS 부동산 소비심리지수 로드 (시도, 월별). Returns: DataFrame [연월, 지역, 소비심리지수, 연도, 월]"""
+    if not os.path.exists(KRIHS_SENTIMENT_PATH):
+        return pd.DataFrame()
+    df = pd.read_csv(KRIHS_SENTIMENT_PATH)
+    # 컬럼명: 지역 → 시도로 rename
+    if "지역" in df.columns and "시도" not in df.columns:
+        df = df.rename(columns={"지역": "시도"})
+    return df
+
+
+def load_housing_supply_data():
+    """주택보급률 로드 (시도, 연간). Returns: DataFrame [연도, 시도, 주택보급률, ...]"""
+    if not os.path.exists(HOUSING_SUPPLY_PATH):
+        return pd.DataFrame()
+    return pd.read_csv(HOUSING_SUPPLY_PATH)
+
+
 def load_policy_events():
     """
     정책 이벤트 DB 로드
