@@ -1464,6 +1464,217 @@ def fetch_kb_indicators():
 
 
 # ═══════════════════════════════════════════════════════
+# 신규 5. KRIHS 부동산 소비심리지수 (KOSIS orgId=390, DT_39002_02)
+# ═══════════════════════════════════════════════════════
+
+# 시도명 정규화 (download_demand_data 내부용)
+_KRIHS_SIDO_NORM = {
+    "서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구",
+    "인천광역시": "인천", "광주광역시": "광주", "대전광역시": "대전",
+    "울산광역시": "울산", "세종특별자치시": "세종", "경기도": "경기",
+    "강원도": "강원", "강원특별자치도": "강원",
+    "충청북도": "충북", "충청남도": "충남",
+    "전라북도": "전북", "전북특별자치도": "전북",
+    "전라남도": "전남", "경상북도": "경북", "경상남도": "경남",
+    "제주특별자치도": "제주",
+    "서울특별시": "서울",
+}
+
+
+def fetch_krihs_sentiment(start_ym="201101", end_ym="202603"):
+    """
+    KOSIS 국토연구원 → 부동산시장 소비심리지수 (월별, 시도)
+    통계표: DT_39002_02 (orgId=390)
+    기준선 100 (>100 강세, <100 약세)
+    출력: {OUTPUT_DIR}/krihs_sentiment_sido_monthly.csv
+    컬럼: 연월, 지역, 소비심리지수, 연도, 월
+    """
+    print("=" * 60)
+    print("[신규5] 부동산 소비심리지수 수집 (KOSIS orgId=390 DT_39002_02)")
+    print("=" * 60)
+
+    api_key = _get_kosis_key()
+
+    params = {
+        "method": "getList",
+        "apiKey": api_key,
+        "orgId": "390",
+        "tblId": "DT_39002_02",
+        "itmId": "ALL",
+        "objL1": "ALL",
+        "prdSe": "M",
+        "startPrdDe": start_ym,
+        "endPrdDe": end_ym,
+        "format": "json",
+        "jsonVD": "Y",
+    }
+
+    try:
+        data = _kosis_api_get(params)
+    except Exception as e:
+        print(f"  KOSIS API 요청 실패: {e}")
+        return None
+
+    if not isinstance(data, list) or len(data) == 0:
+        print(f"  데이터 없음: {data}")
+        return None
+
+    print(f"  {len(data)}행 수신")
+
+    all_rows = []
+    for row in data:
+        region = row.get("C1_NM", "").strip()
+        prd = row.get("PRD_DE", "")
+        val_str = row.get("DT", "")
+
+        if not region or not prd or len(prd) < 6:
+            continue
+
+        # 시도명 정규화 (전국/수도권/비수도권은 그대로 유지)
+        normalized = _KRIHS_SIDO_NORM.get(region, region)
+
+        try:
+            val = float(val_str)
+        except (ValueError, TypeError):
+            continue
+
+        ym = f"{prd[:4]}-{prd[4:6]}"
+        all_rows.append({
+            "연월": ym,
+            "지역": normalized,
+            "소비심리지수": val,
+        })
+
+    if not all_rows:
+        print("  파싱된 데이터 없음")
+        return None
+
+    result = pd.DataFrame(all_rows)
+    result = result.drop_duplicates(subset=["연월", "지역"])
+    result["연도"] = result["연월"].str[:4].astype(int)
+    result["월"] = result["연월"].str[5:7].astype(int)
+    result = result.sort_values(["연월", "지역"]).reset_index(drop=True)
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, "krihs_sentiment_sido_monthly.csv")
+    result.to_csv(out_path, index=False, encoding="utf-8-sig")
+    print(f"  저장: {out_path}")
+    print(f"    행 수: {len(result):,}, 지역 수: {result['지역'].nunique()}")
+    print(f"    기간: {result['연월'].min()} ~ {result['연월'].max()}")
+    print(f"    지역 목록: {sorted(result['지역'].unique())}")
+    # 최근 전국 값 확인
+    national = result[result["지역"] == "전국"].tail(3)
+    if not national.empty:
+        print(f"    최근 전국 소비심리지수: {national[['연월', '소비심리지수']].to_dict('records')}")
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════
+# 신규 6. 주택보급률 (KOSIS orgId=116, DT_MLTM_2100)
+# ═══════════════════════════════════════════════════════
+
+def fetch_housing_supply_rate(start_year=2010, end_year=2024):
+    """
+    KOSIS 국토부 → 시도별 연간 주택보급률
+    통계표: DT_MLTM_2100 (orgId=116)
+    항목: 보급률(다가구 구분거처 반영) — 실질 보급률
+    출력: {OUTPUT_DIR}/mlit_housing_supply_sido_yearly.csv
+    컬럼: 연도, 시도, 주택보급률(%), 가구수(천가구), 주택수(천호)
+    """
+    print("=" * 60)
+    print("[신규6] 주택보급률 수집 (KOSIS orgId=116 DT_MLTM_2100)")
+    print("=" * 60)
+
+    api_key = _get_kosis_key()
+
+    params = {
+        "method": "getList",
+        "apiKey": api_key,
+        "orgId": "116",
+        "tblId": "DT_MLTM_2100",
+        "itmId": "ALL",
+        "objL1": "ALL",
+        "prdSe": "Y",
+        "startPrdDe": str(start_year),
+        "endPrdDe": str(end_year),
+        "format": "json",
+        "jsonVD": "Y",
+    }
+
+    try:
+        data = _kosis_api_get(params)
+    except Exception as e:
+        print(f"  KOSIS API 요청 실패: {e}")
+        return None
+
+    if not isinstance(data, list) or len(data) == 0:
+        print(f"  데이터 없음: {data}")
+        return None
+
+    print(f"  {len(data)}행 수신")
+
+    # 항목별 수집 (보급률/가구수/주택수)
+    target_items = {
+        "보급률(다가구 구분거처 반영)": "주택보급률",
+        "가구수(등록센서스)": "가구수",
+        "주택수(다가구 구분거처 반영)": "주택수",
+    }
+
+    collected = {}  # (연도, 시도) → {컬럼: 값}
+    for row in data:
+        region = row.get("C1_NM", "").strip()
+        prd = row.get("PRD_DE", "")
+        itm_nm = row.get("ITM_NM", "").strip()
+        val_str = row.get("DT", "")
+
+        if not region or not prd:
+            continue
+
+        # 전국/수도권/지방 등 광역집계 포함
+        col_name = target_items.get(itm_nm)
+        if col_name is None:
+            continue
+
+        try:
+            val = float(val_str) if val_str else float("nan")
+        except (ValueError, TypeError):
+            val = float("nan")
+
+        key = (str(prd), region)
+        if key not in collected:
+            collected[key] = {}
+        collected[key][col_name] = val
+
+    if not collected:
+        print("  파싱된 데이터 없음")
+        return None
+
+    all_rows = []
+    for (year_str, region), vals in collected.items():
+        row = {"연도": int(year_str), "시도": region}
+        row.update(vals)
+        all_rows.append(row)
+
+    result = pd.DataFrame(all_rows)
+    result = result.sort_values(["연도", "시도"]).reset_index(drop=True)
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, "mlit_housing_supply_sido_yearly.csv")
+    result.to_csv(out_path, index=False, encoding="utf-8-sig")
+    print(f"  저장: {out_path}")
+    print(f"    행 수: {len(result):,}, 시도 수: {result['시도'].nunique()}")
+    print(f"    기간: {result['연도'].min()} ~ {result['연도'].max()}")
+    # 최근 전국 확인
+    national = result[(result["시도"] == "전국") & (result["연도"] == result["연도"].max())]
+    if not national.empty and "주택보급률" in national.columns:
+        rate = national["주택보급률"].iloc[0]
+        print(f"    최근 전국 주택보급률: {rate}% ({national['연도'].iloc[0]}년)")
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════
 
