@@ -1866,6 +1866,7 @@ with sub_cluster:
             "클러스터링 변수", valid_num,
             default=[v for v in [price_col, vol_col, "GRDP"] if v in valid_num][:3],
             key="cluster_features",
+            format_func=_fmt_var_by_col,
         )
         n_clusters = st.slider("클러스터 수", 2, 8, 4, key="n_clusters")
 
