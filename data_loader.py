@@ -1358,6 +1358,58 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
     if "주담대_잔액" in merged.columns and "가구_소득평균" in merged.columns:
         merged["소득대비대출"] = (merged["주담대_잔액"] * 100000) / _safe("가구_소득평균")
 
+    # ── 신규 파생지표 8종 ────────────────────────────────────────────
+
+    # (1) 월세화 비율 (%): 전체 임대차 중 월세 비중
+    if "월세_거래량" in merged.columns and "전세_거래량" in merged.columns:
+        _denom_wolse = merged["전세_거래량"] + merged["월세_거래량"]
+        merged["월세화비율"] = (merged["월세_거래량"] / _denom_wolse * 100).where(_denom_wolse > 0)
+
+    # (2) 매매 흡수율 (%): 주거수요 중 매매가 차지하는 비중
+    if "거래량" in merged.columns and "전세_거래량" in merged.columns:
+        _denom_abs = merged["거래량"] + merged["전세_거래량"]
+        merged["매매흡수율"] = (merged["거래량"] / _denom_abs * 100).where(_denom_abs > 0)
+
+    # (3) 전세가율 모멘텀 YoY (%p): 전세가율의 전년동월 대비 변화
+    if "전세가율" in merged.columns and freq == "monthly":
+        merged = merged.sort_values(["시도", "연월"])
+        merged["전세가율_모멘텀_YoY"] = merged.groupby("시도")["전세가율"].diff(12)
+
+    # (4) 갭투자 비용 (만원): 매매가에서 전세보증금을 뺀 실투자금
+    if "평균가격" in merged.columns and "전세_보증금평균" in merged.columns:
+        merged["갭비용"] = merged["평균가격"] - merged["전세_보증금평균"]
+
+    # (5)(6) 임대수익률·PR비율: 월임대료등가를 한 번만 계산해 재사용
+    if (
+        "월세_월세평균" in merged.columns
+        and "월세_보증금평균" in merged.columns
+        and "전월세전환율" in merged.columns
+        and "평균가격" in merged.columns
+    ):
+        # 월 임대료 등가 = 월세 + 보증금 × 전월세전환율(연%)/100/12
+        _월임대료등가 = (
+            merged["월세_월세평균"]
+            + merged["월세_보증금평균"] * merged["전월세전환율"] / 100 / 12
+        )
+        # (5) 실질 임대수익률 (%): 연 임대료등가 / 매매가
+        merged["임대수익률"] = (_월임대료등가 * 12 / merged["평균가격"] * 100).where(merged["평균가격"] > 0)
+        # (6) P/R Ratio (배): 매매가 / 연 임대료등가
+        merged["PR비율"] = (merged["평균가격"] / (_월임대료등가 * 12)).where(_월임대료등가 > 0)
+
+    # (7) 미분양 소화기간 (개월): 미분양 / MA12 거래량
+    _unsold_col = "미분양_호수" if "미분양_호수" in merged.columns else ("미분양_평균" if "미분양_평균" in merged.columns else None)
+    if _unsold_col is not None and "거래량" in merged.columns:
+        if freq == "monthly":
+            merged = merged.sort_values(["시도", "연월"])
+        _거래량_MA12 = merged.groupby("시도")["거래량"].transform(
+            lambda s: s.rolling(12, min_periods=3).mean()
+        )
+        merged["미분양소화기간"] = (merged[_unsold_col] / _거래량_MA12).where(_거래량_MA12 > 0)
+
+    # (8) 금리조정 PIR (배): PIR × (1 + 기준금리%)
+    if "PIR" in merged.columns and "기준금리" in merged.columns:
+        merged["금리조정PIR"] = merged["PIR"] * (1 + merged["기준금리"] / 100)
+
     return merged
 
 
