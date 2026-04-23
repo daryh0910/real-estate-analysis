@@ -59,6 +59,8 @@ JEONWOLSE_RATE_PATH = os.path.join(DEMAND_DIR, "jeonwolse_conversion_rate_sido_m
 PRICE_INDEX_PATH = os.path.join(DEMAND_DIR, "housing_price_index_sido_monthly.csv")
 CSI_PATH = os.path.join(DEMAND_DIR, "csi_monthly.csv")
 KB_MARKET_PATH = os.path.join(DEMAND_DIR, "kb_market_supply_demand_monthly.csv")
+KB_INDICATORS_REGIONAL_PATH = os.path.join(DEMAND_DIR, "kb_indicators_regional_monthly.csv")
+KB_INDICATORS_NATIONAL_PATH = os.path.join(DEMAND_DIR, "kb_indicators_national_monthly.csv")
 POLICY_EVENTS_PATH = os.path.join(_PROJECT_ROOT, "data", "policy_events.csv")
 
 # 착공/준공 파이프라인 경로 (data/ 디렉토리 우선, 없으면 DEMAND_DIR 탐색)
