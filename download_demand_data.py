@@ -1532,6 +1532,9 @@ def main():
     if run_all or args.kb:
         results["kb"] = fetch_kb_market_data()
 
+    if run_all or args.kb_indicators:
+        results["kb_indicators"] = fetch_kb_indicators()
+
     print("\n" + "=" * 60)
     print("완료 요약:")
     for key, val in results.items():
