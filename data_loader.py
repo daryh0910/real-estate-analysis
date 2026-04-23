@@ -63,6 +63,13 @@ KB_INDICATORS_REGIONAL_PATH = os.path.join(DEMAND_DIR, "kb_indicators_regional_m
 KB_INDICATORS_NATIONAL_PATH = os.path.join(DEMAND_DIR, "kb_indicators_national_monthly.csv")
 POLICY_EVENTS_PATH = os.path.join(_PROJECT_ROOT, "data", "policy_events.csv")
 
+# 신규 5종 경로
+M2_PATH = os.path.join(DEMAND_DIR, "bok_money_supply_monthly.csv")
+SPREAD_PATH = os.path.join(DEMAND_DIR, "bok_deposit_loan_spread_monthly.csv")
+HOUSEHOLD_CREDIT_PATH = os.path.join(DEMAND_DIR, "bok_household_credit_quarterly.csv")
+KRIHS_SENTIMENT_PATH = os.path.join(DEMAND_DIR, "krihs_sentiment_sido_monthly.csv")
+HOUSING_SUPPLY_PATH = os.path.join(DEMAND_DIR, "mlit_housing_supply_sido_yearly.csv")
+
 # 착공/준공 파이프라인 경로 (data/ 디렉토리 우선, 없으면 DEMAND_DIR 탐색)
 CONSTRUCTION_PATH = os.path.join(_PROJECT_ROOT, "data", "construction_pipeline_sido_monthly.csv")
 if not os.path.exists(CONSTRUCTION_PATH):
