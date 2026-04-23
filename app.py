@@ -971,7 +971,7 @@ with region_sub1:
         compare_options = [tab4_price, tab4_vol, tab4_unit]
         if "월세평균" in tab4_df.columns:
             compare_options.append("월세평균")
-        compare_var = st.selectbox("비교 변수", compare_options, key="compare")
+        compare_var = st.selectbox("비교 변수", compare_options, key="compare", format_func=_fmt_var_by_col)
 
         latest_data = tab4_df[tab4_df["연도"] == latest_year]
         agg_dict = {
