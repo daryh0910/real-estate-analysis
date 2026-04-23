@@ -1435,7 +1435,7 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
             hs_cols = [c for c in hs_cols if c in housing_supply_df.columns]
             # 시도 정규화
             hs_df = housing_supply_df[hs_cols].copy()
-            hs_df["시도"] = hs_df["시도"].apply(lambda x: SIDO_NORM.get(str(x).strip(), str(x).strip()))
+            hs_df["시도"] = hs_df["시도"].apply(lambda x: SIDO_SHORT.get(str(x).strip(), str(x).strip()))
             merged = merged.merge(hs_df, on=["시도", "연도"], how="left")
 
     # ── 파생지표 계산 ────────────────────────────────────────────
