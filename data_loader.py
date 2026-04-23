@@ -1450,6 +1450,8 @@ def load_all_data(force_rebuild=False):
         "price_index": price_index_df,
         "csi": csi_df,
         "kb": kb_df,
+        "kb_indicators_regional": kb_indicators_regional,
+        "kb_indicators_national": kb_indicators_national,
         "policy_events": load_policy_events(),
         "quintile": quintile_df,
         "yearly": yearly,
