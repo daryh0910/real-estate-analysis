@@ -774,7 +774,7 @@ with sub_ts:
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            left_var = st.selectbox("좌측 Y축 (결과)", [v for v in result_vars if v in valid_vars_ts], key="left")
+            left_var = st.selectbox("좌측 Y축 (결과)", [v for v in result_vars if v in valid_vars_ts], key="left", format_func=_fmt_var_by_col)
         with col2:
             right_candidates = [v for v in valid_vars_ts if v != left_var]
             right_var = st.selectbox("우측 Y축 (원인)", right_candidates, key="right")
