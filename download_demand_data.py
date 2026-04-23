@@ -1305,6 +1305,165 @@ def fetch_kb_market_data():
 
 
 # ═══════════════════════════════════════════════════════
+# KB부동산 신규 지표 (PIR/J-PIR/HOI/HAI/선도50/월세지수)
+# ═══════════════════════════════════════════════════════
+
+def fetch_kb_indicators():
+    """
+    KB부동산 신규 지표 수집:
+      - KB_PIR      : 주택가격소득비 (매매, 중위 주택분위3·소득분위3, 전국/서울)
+      - KB_J_PIR    : 전세가격소득비 (전세, 동일 기준)
+      - KB_HAI      : 주택구매력지수 (전국/서울/경기/인천/6대광역시 등)
+      - KB_HOI      : 주택구매잠재력지수 (서울/경기/인천만 제공)
+      - KB_선도50지수 : 선도아파트50지수 (전국, 지역구분 없음)
+      - KB_월세지수   : 월간 아파트 월세지수 (서울/경기/인천/수도권 등)
+
+    PIR/J-PIR: 중위(주택분위=3, 소득분위=3) 기준값 사용
+    HAI/HOI: 아파트 종합 기준값 사용
+    지역 단위: 제공 범위에 따라 다름 (전국/제한 지역)
+    """
+    try:
+        from PublicDataReader import Kbland
+    except ImportError:
+        print("  PublicDataReader 미설치. pip install PublicDataReader")
+        return None
+
+    import warnings
+    warnings.filterwarnings("ignore")
+
+    print("=" * 60)
+    print("[KB] KB부동산 신규 지표 수집")
+    print("=" * 60)
+
+    api = Kbland()
+
+    # ── 결과물 분리: 지역 단위(지역코드 있음) vs 전국단일 ──
+    frames_regional = []   # 지역명 컬럼 있는 지표
+    frames_national = []   # 지역명 없는 지표 (선도50)
+
+    # ── (1) PIR: 매매 주택가격소득비 ──────────────────────
+    print("  [1/6] PIR (매매) 수집 중...")
+    try:
+        df_pir = api.get_pir(메뉴코드="01", 기간="20")
+        # 중위(주택분위=3, 소득분위=3) 기준 필터
+        df_pir = df_pir[(df_pir["주택분위"] == 3) & (df_pir["소득분위"] == 3)].copy()
+        df_pir["연월"] = df_pir["날짜"].dt.strftime("%Y-%m")
+        df_pir = df_pir.rename(columns={"PIR": "KB_PIR", "지역명": "_지역명"})
+        # 전국/서울만 제공 — 지역명 그대로 사용 ("전국" 포함)
+        df_pir = df_pir[["_지역명", "연월", "KB_PIR"]].rename(columns={"_지역명": "지역명"})
+        frames_regional.append(df_pir)
+        print(f"    {len(df_pir)}행, {df_pir['연월'].min()} ~ {df_pir['연월'].max()}, 지역: {sorted(df_pir['지역명'].unique())}")
+    except Exception as e:
+        print(f"    실패: {e}")
+
+    # ── (2) J-PIR: 전세 주택가격소득비 ───────────────────
+    print("  [2/6] J-PIR (전세) 수집 중...")
+    try:
+        df_jpir = api.get_pir(메뉴코드="02", 기간="20")
+        df_jpir = df_jpir[(df_jpir["주택분위"] == 3) & (df_jpir["소득분위"] == 3)].copy()
+        df_jpir["연월"] = df_jpir["날짜"].dt.strftime("%Y-%m")
+        df_jpir = df_jpir.rename(columns={"PIR": "KB_J_PIR", "지역명": "_지역명"})
+        df_jpir = df_jpir[["_지역명", "연월", "KB_J_PIR"]].rename(columns={"_지역명": "지역명"})
+        frames_regional.append(df_jpir)
+        print(f"    {len(df_jpir)}행, {df_jpir['연월'].min()} ~ {df_jpir['연월'].max()}, 지역: {sorted(df_jpir['지역명'].unique())}")
+    except Exception as e:
+        print(f"    실패: {e}")
+
+    # ── (3) HAI: 주택구매력지수 ───────────────────────────
+    print("  [3/6] HAI 수집 중...")
+    try:
+        df_hai = api.get_hai()
+        df_hai["연월"] = df_hai["날짜"].dt.strftime("%Y-%m")
+        # 종합 컬럼 사용 (아파트/단독/연립 포함)
+        hai_col = "종합" if "종합" in df_hai.columns else df_hai.columns[3]
+        df_hai = df_hai[["지역명", "연월", hai_col]].rename(columns={hai_col: "KB_HAI"})
+        frames_regional.append(df_hai)
+        print(f"    {len(df_hai)}행, {df_hai['연월'].min()} ~ {df_hai['연월'].max()}, 지역: {sorted(df_hai['지역명'].unique())}")
+    except Exception as e:
+        print(f"    실패: {e}")
+
+    # ── (4) HOI: 주택구매잠재력지수 ──────────────────────
+    print("  [4/6] HOI 수집 중...")
+    try:
+        df_hoi = api.get_kb_housing_purchase_potential_index()
+        df_hoi["연월"] = df_hoi["날짜"].dt.strftime("%Y-%m")
+        hoi_col = "잠재력지수" if "잠재력지수" in df_hoi.columns else df_hoi.columns[3]
+        df_hoi = df_hoi[["지역명", "연월", hoi_col]].rename(columns={hoi_col: "KB_HOI"})
+        frames_regional.append(df_hoi)
+        print(f"    {len(df_hoi)}행, {df_hoi['연월'].min()} ~ {df_hoi['연월'].max()}, 지역: {sorted(df_hoi['지역명'].unique())}")
+    except Exception as e:
+        print(f"    실패: {e}")
+
+    # ── (5) 선도50지수: 전국 단일 시계열 ─────────────────
+    print("  [5/6] 선도50지수 수집 중...")
+    try:
+        df_lead = api.get_lead_apartment_50_index()
+        df_lead["연월"] = df_lead["날짜"].dt.strftime("%Y-%m")
+        lead_col = "선도50지수" if "선도50지수" in df_lead.columns else df_lead.columns[1]
+        df_lead = df_lead[["연월", lead_col]].rename(columns={lead_col: "KB_선도50지수"})
+        frames_national.append(df_lead)
+        print(f"    {len(df_lead)}행, {df_lead['연월'].min()} ~ {df_lead['연월'].max()}, 지역단위: 전국단일")
+    except Exception as e:
+        print(f"    실패: {e}")
+
+    # ── (6) 월세지수: 아파트 월세지수 ────────────────────
+    print("  [6/6] 월세지수 수집 중...")
+    try:
+        df_wolse = api.get_monthly_apartment_wolse_index()
+        df_wolse["연월"] = df_wolse["날짜"].dt.strftime("%Y-%m")
+        # 아파트 월세 필터
+        if "매물종별구분" in df_wolse.columns:
+            df_wolse = df_wolse[df_wolse["매물종별구분"] == "아파트"]
+        if "거래구분" in df_wolse.columns:
+            df_wolse = df_wolse[df_wolse["거래구분"] == "월세"]
+        wolse_col = "가격지수" if "가격지수" in df_wolse.columns else df_wolse.columns[-1]
+        df_wolse = df_wolse[["지역명", "연월", wolse_col]].rename(columns={wolse_col: "KB_월세지수"})
+        frames_regional.append(df_wolse)
+        print(f"    {len(df_wolse)}행, {df_wolse['연월'].min()} ~ {df_wolse['연월'].max()}, 지역: {sorted(df_wolse['지역명'].unique())}")
+    except Exception as e:
+        print(f"    실패: {e}")
+
+    if not frames_regional and not frames_national:
+        print("  수집 실패 — 저장 없음")
+        return None
+
+    # ── 지역 단위 지표 저장 (PIR/J-PIR/HAI/HOI/월세지수) ──
+    if frames_regional:
+        # 각 지표별 지역명이 다르므로 개별 outer merge 하지 않고 concat 후 저장
+        # (지역명 컬럼을 공통 키로 사용; 연월+지역명 중복 없도록 outer)
+        from functools import reduce
+        regional_combined = reduce(
+            lambda a, b: a.merge(b, on=["지역명", "연월"], how="outer"),
+            frames_regional,
+        )
+        regional_combined = regional_combined.sort_values(["연월", "지역명"]).reset_index(drop=True)
+        out_regional = os.path.join(OUTPUT_DIR, "kb_indicators_regional_monthly.csv")
+        regional_combined.to_csv(out_regional, index=False, encoding="utf-8-sig")
+        print(f"\n  저장(지역단위): {out_regional}")
+        print(f"    {len(regional_combined):,}행, 지역 {regional_combined['지역명'].nunique()}개")
+        print(f"    컬럼: {[c for c in regional_combined.columns if c.startswith('KB_')]}")
+
+    # ── 전국 단일 지표 저장 (선도50지수) ──────────────────
+    if frames_national:
+        from functools import reduce
+        national_combined = reduce(
+            lambda a, b: a.merge(b, on=["연월"], how="outer"),
+            frames_national,
+        )
+        national_combined = national_combined.sort_values("연월").reset_index(drop=True)
+        out_national = os.path.join(OUTPUT_DIR, "kb_indicators_national_monthly.csv")
+        national_combined.to_csv(out_national, index=False, encoding="utf-8-sig")
+        print(f"\n  저장(전국단일): {out_national}")
+        print(f"    {len(national_combined):,}행")
+        print(f"    컬럼: {[c for c in national_combined.columns if c.startswith('KB_')]}")
+
+    return {
+        "regional": regional_combined if frames_regional else pd.DataFrame(),
+        "national": national_combined if frames_national else pd.DataFrame(),
+    }
+
+
+# ═══════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════
 
