@@ -1479,6 +1479,8 @@ def main():
                         help="KOSIS 소득5분위별 가계자산만")
     parser.add_argument("--kb", action="store_true",
                         help="KB부동산 수급 데이터만")
+    parser.add_argument("--kb-indicators", action="store_true",
+                        help="KB부동산 신규 지표(PIR/J-PIR/HAI/HOI/선도50/월세지수)만")
     parser.add_argument(
         "--bok-start", default="200612", help="BOK 조회 시작월 (기본: 200612)"
     )
