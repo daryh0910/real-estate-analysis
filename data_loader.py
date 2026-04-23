@@ -1405,6 +1405,8 @@ def load_all_data(force_rebuild=False):
         csi_df = load_csi_data()
     with st.spinner("KB부동산 수급 데이터 로딩 중..."):
         kb_df = load_kb_market_data()
+    with st.spinner("KB부동산 신규 지표 데이터 로딩 중..."):
+        kb_indicators_regional, kb_indicators_national = load_kb_indicators()
     with st.spinner("착공/준공 파이프라인 데이터 로딩 중..."):
         construction_df = load_construction_data()
     with st.spinner("KOSIS 연령대별 인구 데이터 로딩 중..."):
