@@ -911,6 +911,31 @@ def load_kb_market_data():
     return df
 
 
+def load_kb_indicators():
+    """
+    KB부동산 신규 지표 로드.
+
+    regional: 지역별 지표 (PIR/J-PIR/HAI/HOI/월세지수)
+      - 지역명 컬럼: 전국/서울/경기/인천/6개광역시 등 KB 제공 단위
+      - 컬럼: 지역명, 연월, KB_PIR, KB_J_PIR, KB_HAI, KB_HOI, KB_월세지수
+
+    national: 전국 단일 시계열 (선도50지수)
+      - 컬럼: 연월, KB_선도50지수
+
+    Returns: (regional_df, national_df) 튜플
+    """
+    regional = pd.DataFrame()
+    national = pd.DataFrame()
+
+    if os.path.exists(KB_INDICATORS_REGIONAL_PATH):
+        regional = pd.read_csv(KB_INDICATORS_REGIONAL_PATH)
+
+    if os.path.exists(KB_INDICATORS_NATIONAL_PATH):
+        national = pd.read_csv(KB_INDICATORS_NATIONAL_PATH)
+
+    return regional, national
+
+
 def load_csi_data():
     """
     소비자심리지수(CSI) 로드 (전국, 월별)
