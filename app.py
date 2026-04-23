@@ -842,6 +842,7 @@ with sub_ts:
             "비교할 변수 선택", valid_vars_ts,
             default=[v for v in [price_col, "GRDP"] if v in valid_vars_ts],
             key="norm_vars",
+            format_func=_fmt_var_by_col,
         )
         if norm_vars and sido_for_ts:
             norm_df = ts_df[[time_col] + [v for v in norm_vars if v in ts_df.columns]].dropna()
