@@ -34,3 +34,7 @@ SPRINT_2_PLAN.md
 
 # 작업 계획
 plans/
+
+# 로컬 SQLite (커뮤니티 게시판)
+board.db
+board_images/
