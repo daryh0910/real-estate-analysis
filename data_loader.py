@@ -1373,6 +1373,71 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
                     how="left",
                 )
 
+    # M2 광의통화 병합 (전국, 월별 → 모든 시도에 동일 적용)
+    if m2_df is not None and not m2_df.empty:
+        m2_cols = [c for c in m2_df.columns if c not in ["연월", "연도", "월"]]
+        if m2_cols:
+            if freq == "yearly":
+                m2_yearly = m2_df[m2_df["월"] == 12][["연도"] + m2_cols].copy()
+                merged = merged.merge(m2_yearly, on=["연도"], how="left")
+            else:
+                merged = merged.merge(
+                    m2_df[["연도", "월"] + m2_cols], on=["연도", "월"], how="left"
+                )
+
+    # 예대금리차 병합 (전국, 월별 → 모든 시도에 동일 적용)
+    if spread_df is not None and not spread_df.empty:
+        spread_cols = [c for c in spread_df.columns if c not in ["연월", "연도", "월"]]
+        if spread_cols:
+            if freq == "yearly":
+                spread_yearly = spread_df[spread_df["월"] == 12][["연도"] + spread_cols].copy()
+                merged = merged.merge(spread_yearly, on=["연도"], how="left")
+            else:
+                merged = merged.merge(
+                    spread_df[["연도", "월"] + spread_cols], on=["연도", "월"], how="left"
+                )
+
+    # 가계신용잔액+연체율 병합 (전국, 월별 → 모든 시도에 동일 적용)
+    if household_credit_df is not None and not household_credit_df.empty:
+        hc_cols = [c for c in household_credit_df.columns if c not in ["연월", "연도", "월"]]
+        if hc_cols:
+            if freq == "yearly":
+                # 분기 데이터: 12월 기준으로 연간 집계
+                hc_yearly = household_credit_df[household_credit_df["월"] == 12][["연도"] + hc_cols].copy()
+                merged = merged.merge(hc_yearly, on=["연도"], how="left")
+            else:
+                merged = merged.merge(
+                    household_credit_df[["연도", "월"] + hc_cols], on=["연도", "월"], how="left"
+                )
+
+    # KRIHS 부동산 소비심리지수 병합 (시도, 월별)
+    if krihs_sentiment_df is not None and not krihs_sentiment_df.empty:
+        # 시도 컬럼 정규화
+        if "지역" in krihs_sentiment_df.columns and "시도" not in krihs_sentiment_df.columns:
+            krihs_sentiment_df = krihs_sentiment_df.rename(columns={"지역": "시도"})
+        # 17개 시도 + 전국/수도권/비수도권 → 시도만 필터
+        sido_list = list(SIDO_NORM.values()) + ["전국"]
+        ks_sido = krihs_sentiment_df[krihs_sentiment_df["시도"].isin(sido_list)].copy()
+        if not ks_sido.empty and "소비심리지수" in ks_sido.columns:
+            if freq == "yearly":
+                ks_yearly = ks_sido[ks_sido["월"] == 12][["시도", "연도", "소비심리지수"]].copy()
+                ks_yearly = ks_yearly.rename(columns={"소비심리지수": "부동산소비심리지수"})
+                merged = merged.merge(ks_yearly, on=["시도", "연도"], how="left")
+            else:
+                ks_monthly = ks_sido[["시도", "연도", "월", "소비심리지수"]].copy()
+                ks_monthly = ks_monthly.rename(columns={"소비심리지수": "부동산소비심리지수"})
+                merged = merged.merge(ks_monthly, on=["시도", "연도", "월"], how="left")
+
+    # 주택보급률 병합 (시도, 연간 → monthly에서도 연도 키로 병합)
+    if housing_supply_df is not None and not housing_supply_df.empty:
+        if "주택보급률" in housing_supply_df.columns and "시도" in housing_supply_df.columns:
+            hs_cols = ["시도", "연도", "주택보급률"]
+            hs_cols = [c for c in hs_cols if c in housing_supply_df.columns]
+            # 시도 정규화
+            hs_df = housing_supply_df[hs_cols].copy()
+            hs_df["시도"] = hs_df["시도"].apply(lambda x: SIDO_NORM.get(str(x).strip(), str(x).strip()))
+            merged = merged.merge(hs_df, on=["시도", "연도"], how="left")
+
     # ── 파생지표 계산 ────────────────────────────────────────────
     _safe = lambda col: merged[col].replace(0, np.nan)
 
