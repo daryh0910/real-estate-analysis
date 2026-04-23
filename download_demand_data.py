@@ -1751,6 +1751,14 @@ def main():
     if run_all or args.kb_indicators:
         results["kb_indicators"] = fetch_kb_indicators()
 
+    if run_all or args.krihs_sentiment:
+        results["krihs_sentiment"] = fetch_krihs_sentiment()
+
+    if run_all or args.housing_supply:
+        results["housing_supply"] = fetch_housing_supply_rate(
+            args.kosis_start, args.kosis_end
+        )
+
     print("\n" + "=" * 60)
     print("완료 요약:")
     for key, val in results.items():
