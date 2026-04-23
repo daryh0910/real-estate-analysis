@@ -1576,6 +1576,16 @@ def load_all_data(force_rebuild=False):
         construction_df = load_construction_data()
     with st.spinner("KOSIS 연령대별 인구 데이터 로딩 중..."):
         kosis_age_pop_df = load_kosis_age_population()
+    with st.spinner("M2 광의통화 데이터 로딩 중..."):
+        m2_df = load_m2_data()
+    with st.spinner("예대금리차 데이터 로딩 중..."):
+        spread_df = load_spread_data()
+    with st.spinner("가계신용 데이터 로딩 중..."):
+        household_credit_df = load_household_credit_data()
+    with st.spinner("부동산 소비심리지수 데이터 로딩 중..."):
+        krihs_sentiment_df = load_krihs_sentiment_data()
+    with st.spinner("주택보급률 데이터 로딩 중..."):
+        housing_supply_df = load_housing_supply_data()
 
     merge_kwargs = dict(
         jeonse_df=jeonse_df, wolse_df=wolse_df, rent_all_df=rent_all_df,
@@ -1587,6 +1597,10 @@ def load_all_data(force_rebuild=False):
         csi_df=csi_df, kb_df=kb_df,
         construction_df=construction_df,
         kosis_age_pop_df=kosis_age_pop_df,
+        m2_df=m2_df, spread_df=spread_df,
+        household_credit_df=household_credit_df,
+        krihs_sentiment_df=krihs_sentiment_df,
+        housing_supply_df=housing_supply_df,
     )
 
     yearly = merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly", **merge_kwargs)
