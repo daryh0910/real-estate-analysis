@@ -1732,7 +1732,7 @@ with sub_outlier:
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            outlier_var = st.selectbox("분석 변수", valid_num, key="outlier_var")
+            outlier_var = st.selectbox("분석 변수", valid_num, key="outlier_var", format_func=_fmt_var_by_col)
         with col2:
             outlier_method = st.selectbox("탐지 방법", ["zscore", "iqr"], key="outlier_method")
         with col3:
