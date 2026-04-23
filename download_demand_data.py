@@ -1692,6 +1692,10 @@ def main():
                         help="KB부동산 수급 데이터만")
     parser.add_argument("--kb-indicators", action="store_true",
                         help="KB부동산 신규 지표(PIR/J-PIR/HAI/HOI/선도50/월세지수)만")
+    parser.add_argument("--krihs-sentiment", action="store_true",
+                        help="KRIHS 부동산 소비심리지수만")
+    parser.add_argument("--housing-supply", action="store_true",
+                        help="주택보급률만")
     parser.add_argument(
         "--bok-start", default="200612", help="BOK 조회 시작월 (기본: 200612)"
     )
