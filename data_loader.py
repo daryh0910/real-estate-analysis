@@ -1416,7 +1416,7 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
         if "지역" in krihs_sentiment_df.columns and "시도" not in krihs_sentiment_df.columns:
             krihs_sentiment_df = krihs_sentiment_df.rename(columns={"지역": "시도"})
         # 17개 시도 + 전국/수도권/비수도권 → 시도만 필터
-        sido_list = list(SIDO_NORM.values()) + ["전국"]
+        sido_list = list(SIDO_SHORT.values()) + ["전국"]
         ks_sido = krihs_sentiment_df[krihs_sentiment_df["시도"].isin(sido_list)].copy()
         if not ks_sido.empty and "소비심리지수" in ks_sido.columns:
             if freq == "yearly":
