@@ -1423,12 +1423,286 @@ def fetch_csi(start_ym="200809", end_ym="202612"):
 
 
 # ═══════════════════════════════════════════════════════
+# 9. M2 광의통화 (BOK ECOS — 161Y006 평잔 원계열)
+# ═══════════════════════════════════════════════════════
+
+def fetch_m2_money_supply(start_ym="200001", end_ym="202612"):
+    """
+    BOK ECOS API → M2 광의통화 평잔 (전국, 월별)
+    통계표: 161Y006 (M2 상품별 구성내역, 평잔, 원계열)
+    항목코드: BBHA00 (M2 합계)
+    출력: {OUTPUT_DIR}/bok_money_supply_monthly.csv
+    컬럼: 연월, M2잔액(십억원), M2_YoY(%), 연도, 월
+    """
+    print("=" * 60)
+    print("[9] M2 광의통화 수집 (BOK 161Y006)")
+    print("=" * 60)
+
+    url = (
+        f"{BOK_BASE_URL}/StatisticSearch/{BOK_API_KEY}/json/kr/"
+        f"1/99999/161Y006/M/{start_ym}/{end_ym}/BBHA00/"
+    )
+    print(f"  요청: M2 평잔 원계열 (161Y006/BBHA00)")
+
+    try:
+        resp = _api_get(url)
+        data = resp.json()
+    except Exception as e:
+        print(f"  BOK API 요청 실패: {e}")
+        return None
+
+    if "StatisticSearch" not in data:
+        err_msg = data.get("RESULT", {}).get("MESSAGE", "알 수 없는 오류")
+        print(f"  BOK API 오류: {err_msg}")
+        return None
+
+    rows = data["StatisticSearch"]["row"]
+    print(f"  {len(rows)}행 수신")
+
+    all_rows = []
+    for row in rows:
+        time_str = row.get("TIME", "")
+        value_str = row.get("DATA_VALUE", "")
+        if len(time_str) < 6:
+            continue
+        try:
+            val = float(value_str.replace(",", ""))
+        except (ValueError, AttributeError):
+            continue
+        ym = f"{time_str[:4]}-{time_str[4:6]}"
+        all_rows.append({"연월": ym, "M2잔액": val})
+
+    if not all_rows:
+        print("  데이터 없음")
+        return None
+
+    result = pd.DataFrame(all_rows).sort_values("연월").reset_index(drop=True)
+    result["연도"] = result["연월"].str[:4].astype(int)
+    result["월"] = result["연월"].str[5:7].astype(int)
+    # YoY 증감률 계산 (전년동월비 %)
+    result["M2_YoY"] = result["M2잔액"].pct_change(12) * 100
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, "bok_money_supply_monthly.csv")
+    result.to_csv(out_path, index=False, encoding="utf-8-sig")
+    print(f"  저장: {out_path}")
+    print(f"    행 수: {len(result):,}, 기간: {result['연월'].min()} ~ {result['연월'].max()}")
+    print(f"    최근 M2: {result['M2잔액'].iloc[-1]:,.0f}십억원 ({result['연월'].iloc[-1]})")
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════
+# 10. 예대금리차 (BOK ECOS — 수신금리 121Y002, 대출금리 121Y006)
+# ═══════════════════════════════════════════════════════
+
+def fetch_deposit_loan_spread(start_ym="200601", end_ym="202612"):
+    """
+    BOK ECOS API → 예금은행 예대금리차 (신규취급액 기준)
+    수신금리: 121Y002/BEABAA2 (저축성수신)
+    대출금리: 121Y006/BECBLA01 (대출평균)
+    출력: {OUTPUT_DIR}/bok_deposit_loan_spread_monthly.csv
+    컬럼: 연월, 예금금리(%), 대출금리(%), 예대금리차(%p), 연도, 월
+    """
+    print("=" * 60)
+    print("[10] 예대금리차 수집 (BOK 121Y002 / 121Y006)")
+    print("=" * 60)
+
+    rate_items = [
+        ("121Y002", "BEABAA2", "예금금리"),   # 저축성수신 평균
+        ("121Y006", "BECBLA01", "대출금리"),  # 대출 전체 평균
+    ]
+
+    collected = {}
+    for stat_code, item_code, label in rate_items:
+        url = (
+            f"{BOK_BASE_URL}/StatisticSearch/{BOK_API_KEY}/json/kr/"
+            f"1/99999/{stat_code}/M/{start_ym}/{end_ym}/{item_code}/"
+        )
+        print(f"  요청: {label} ({stat_code}/{item_code})")
+
+        try:
+            resp = _api_get(url)
+            data = resp.json()
+        except Exception as e:
+            print(f"  BOK API 요청 실패: {e}")
+            continue
+
+        if "StatisticSearch" not in data:
+            err_msg = data.get("RESULT", {}).get("MESSAGE", "알 수 없는 오류")
+            print(f"  BOK API 오류: {err_msg}")
+            continue
+
+        rows = data["StatisticSearch"]["row"]
+        print(f"    {len(rows)}행 수신")
+
+        for row in rows:
+            time_str = row.get("TIME", "")
+            value_str = row.get("DATA_VALUE", "")
+            if len(time_str) < 6:
+                continue
+            try:
+                val = float(value_str.replace(",", ""))
+            except (ValueError, AttributeError):
+                continue
+            ym = f"{time_str[:4]}-{time_str[4:6]}"
+            if ym not in collected:
+                collected[ym] = {}
+            collected[ym][label] = val
+
+    if not collected:
+        print("  데이터 없음")
+        return None
+
+    all_rows = [{"연월": ym, **vals} for ym, vals in collected.items()]
+    result = pd.DataFrame(all_rows).sort_values("연월").reset_index(drop=True)
+
+    # 예대금리차 계산
+    if "예금금리" in result.columns and "대출금리" in result.columns:
+        result["예대금리차"] = result["대출금리"] - result["예금금리"]
+
+    result["연도"] = result["연월"].str[:4].astype(int)
+    result["월"] = result["연월"].str[5:7].astype(int)
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, "bok_deposit_loan_spread_monthly.csv")
+    result.to_csv(out_path, index=False, encoding="utf-8-sig")
+    print(f"  저장: {out_path}")
+    print(f"    행 수: {len(result):,}, 기간: {result['연월'].min()} ~ {result['연월'].max()}")
+    if "예대금리차" in result.columns:
+        print(f"    최근 예대금리차: {result['예대금리차'].dropna().iloc[-1]:.2f}%p ({result.loc[result['예대금리차'].notna(), '연월'].iloc[-1]})")
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════
+# 11. 가계신용잔액 + 연체율 (BOK ECOS)
+# ═══════════════════════════════════════════════════════
+
+def fetch_household_credit(start_ym="200001", end_ym="202612"):
+    """
+    BOK ECOS API → 가계신용 잔액(분기) + 은행 가계대출 연체율(월)
+    가계신용: 151Y001/1000000 (분기) → 분기 말월(3/6/9/12월)에 할당, 나머지는 NaN
+    연체율: 901Y054/MO3AB/AB (월별, 가계대출, 은행전체)
+    출력: {OUTPUT_DIR}/bok_household_credit_quarterly.csv
+    컬럼: 연월, 가계신용잔액(십억원), 가계대출연체율(%), 연도, 월
+    """
+    print("=" * 60)
+    print("[11] 가계신용잔액 + 연체율 수집 (BOK 151Y001 / 901Y054)")
+    print("=" * 60)
+
+    # 1) 가계신용 (분기)
+    start_q = f"{start_ym[:4]}Q1"
+    end_q = f"{end_ym[:4]}Q4"
+    url_credit = (
+        f"{BOK_BASE_URL}/StatisticSearch/{BOK_API_KEY}/json/kr/"
+        f"1/99999/151Y001/Q/{start_q}/{end_q}/1000000/"
+    )
+    print(f"  요청: 가계신용잔액 (151Y001/Q)")
+
+    credit_rows = []
+    try:
+        resp = _api_get(url_credit)
+        data = resp.json()
+        if "StatisticSearch" in data:
+            raw_rows = data["StatisticSearch"]["row"]
+            print(f"    {len(raw_rows)}행 수신")
+            for row in raw_rows:
+                time_str = row.get("TIME", "")  # 예: "2023Q1"
+                value_str = row.get("DATA_VALUE", "")
+                if len(time_str) < 6:
+                    continue
+                try:
+                    val = float(value_str.replace(",", ""))
+                except (ValueError, AttributeError):
+                    continue
+                # 분기 → 말월 변환 (Q1→03, Q2→06, Q3→09, Q4→12)
+                year = time_str[:4]
+                quarter = time_str[5]
+                month = {"1": "03", "2": "06", "3": "09", "4": "12"}.get(quarter)
+                if month:
+                    credit_rows.append({"연월": f"{year}-{month}", "가계신용잔액": val})
+        else:
+            err_msg = data.get("RESULT", {}).get("MESSAGE", "알 수 없는 오류")
+            print(f"    BOK 오류: {err_msg}")
+    except Exception as e:
+        print(f"    요청 실패: {e}")
+
+    # 2) 연체율 (월별)
+    url_overdue = (
+        f"{BOK_BASE_URL}/StatisticSearch/{BOK_API_KEY}/json/kr/"
+        f"1/99999/901Y054/M/{start_ym}/{end_ym}/MO3AB/AB/"
+    )
+    print(f"  요청: 가계대출연체율 (901Y054/MO3AB/AB)")
+
+    overdue_rows = []
+    try:
+        resp = _api_get(url_overdue)
+        data = resp.json()
+        if "StatisticSearch" in data:
+            raw_rows = data["StatisticSearch"]["row"]
+            print(f"    {len(raw_rows)}행 수신")
+            for row in raw_rows:
+                time_str = row.get("TIME", "")
+                value_str = row.get("DATA_VALUE", "")
+                if len(time_str) < 6:
+                    continue
+                try:
+                    val = float(value_str.replace(",", ""))
+                except (ValueError, AttributeError):
+                    continue
+                ym = f"{time_str[:4]}-{time_str[4:6]}"
+                overdue_rows.append({"연월": ym, "가계대출연체율": val})
+        else:
+            err_msg = data.get("RESULT", {}).get("MESSAGE", "알 수 없는 오류")
+            print(f"    BOK 오류: {err_msg}")
+    except Exception as e:
+        print(f"    요청 실패: {e}")
+
+    if not credit_rows and not overdue_rows:
+        print("  데이터 없음")
+        return None
+
+    # 병합: 연체율 월별 기준으로 신용잔액 병합
+    if overdue_rows:
+        df_overdue = pd.DataFrame(overdue_rows).sort_values("연월").reset_index(drop=True)
+    else:
+        df_overdue = pd.DataFrame(columns=["연월"])
+
+    if credit_rows:
+        df_credit = pd.DataFrame(credit_rows)
+        if not df_overdue.empty:
+            result = df_overdue.merge(df_credit, on="연월", how="left")
+        else:
+            result = df_credit.copy()
+    else:
+        result = df_overdue.copy()
+
+    result["연도"] = result["연월"].str[:4].astype(int)
+    result["월"] = result["연월"].str[5:7].astype(int)
+    result = result.sort_values("연월").reset_index(drop=True)
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, "bok_household_credit_quarterly.csv")
+    result.to_csv(out_path, index=False, encoding="utf-8-sig")
+    print(f"  저장: {out_path}")
+    print(f"    행 수: {len(result):,}, 기간: {result['연월'].min()} ~ {result['연월'].max()}")
+    cols_avail = [c for c in ["가계신용잔액", "가계대출연체율"] if c in result.columns]
+    for col in cols_avail:
+        last_val = result[col].dropna()
+        if not last_val.empty:
+            print(f"    최근 {col}: {last_val.iloc[-1]:,.1f} ({result.loc[result[col].notna(), '연월'].iloc[-1]})")
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════
 
 def main():
     parser = argparse.ArgumentParser(
-        description="공공데이터 API 수집: 미분양, 인구이동, 금리, 전월세전환율, 가격지수, 주택건설실적, 지가변동률, CSI"
+        description="공공데이터 API 수집: 미분양, 인구이동, 금리, 전월세전환율, 가격지수, 주택건설실적, 지가변동률, CSI, M2, 예대금리차, 가계신용"
     )
     parser.add_argument("--unsold", action="store_true", help="미분양주택만")
     parser.add_argument("--migration", action="store_true", help="인구이동만")
@@ -1438,12 +1712,16 @@ def main():
     parser.add_argument("--land-price", action="store_true", help="지가변동률만")
     parser.add_argument("--construction", action="store_true", help="주택건설실적(착공/준공)만")
     parser.add_argument("--csi", action="store_true", help="소비자심리지수(CSI)만")
+    parser.add_argument("--m2", action="store_true", help="M2 광의통화만")
+    parser.add_argument("--spread", action="store_true", help="예대금리차만")
+    parser.add_argument("--household-credit", action="store_true", help="가계신용잔액+연체율만")
     args = parser.parse_args()
 
     run_all = not (args.unsold or args.migration or args.rate
                    or args.jeonwolse or args.price_index
                    or args.land_price or args.construction
-                   or args.csi)
+                   or args.csi or args.m2 or args.spread
+                   or args.household_credit)
 
     print(f"\n데이터 출력 디렉토리: {OUTPUT_DIR}\n")
 
@@ -1472,6 +1750,15 @@ def main():
 
     if run_all or args.csi:
         results["csi"] = fetch_csi()
+
+    if run_all or args.m2:
+        results["m2"] = fetch_m2_money_supply()
+
+    if run_all or args.spread:
+        results["spread"] = fetch_deposit_loan_spread()
+
+    if run_all or args.household_credit:
+        results["household_credit"] = fetch_household_credit()
 
     print("\n" + "=" * 60)
     print("완료 요약:")
