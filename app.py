@@ -1684,7 +1684,7 @@ with sub_reg:
 
         col_y, col_x = st.columns([1, 2])
         with col_y:
-            reg_y = st.selectbox("종속변수 (Y)", [v for v in result_vars if v in valid_num], key="reg_y")
+            reg_y = st.selectbox("종속변수 (Y)", [v for v in result_vars if v in valid_num], key="reg_y", format_func=_fmt_var_by_col)
         with col_x:
             reg_x_candidates = [v for v in valid_num if v != reg_y]
             reg_x = st.multiselect("독립변수 (X)", reg_x_candidates,
