@@ -1633,6 +1633,11 @@ def load_all_data(force_rebuild=False):
         "kb_indicators_national": kb_indicators_national,
         "policy_events": load_policy_events(),
         "quintile": quintile_df,
+        "m2": m2_df,
+        "spread": spread_df,
+        "household_credit": household_credit_df,
+        "krihs_sentiment": krihs_sentiment_df,
+        "housing_supply": housing_supply_df,
         "yearly": yearly,
         "monthly": monthly,
     }
