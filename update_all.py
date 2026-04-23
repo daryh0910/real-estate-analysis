@@ -378,16 +378,36 @@ def run_data_collection(csv_map, incremental=False, dry_run=False):
             elapsed = time.time() - t0
 
             if result_df is not None:
+                # 증분 모드: 기존 CSV + 신규 데이터 병합 후 저장
+                if incremental and kwargs and os.path.exists(csv_path):
+                    df_old = _read_csv_safe(csv_path)
+                    if df_old is not None and len(df_old) > 0:
+                        # 기존 데이터에서 신규 범위와 겹치는 구간 제거 후 concat
+                        col_name = info["col"]
+                        if col_name in df_old.columns and col_name in result_df.columns:
+                            new_min = result_df[col_name].dropna().min()
+                            df_old_filtered = df_old[df_old[col_name] < new_min]
+                            result_df = pd.concat(
+                                [df_old_filtered, result_df], ignore_index=True
+                            )
+                        else:
+                            result_df = pd.concat(
+                                [df_old, result_df], ignore_index=True
+                            )
+                        result_df = result_df.drop_duplicates(
+                            subset=[c for c in result_df.columns
+                                    if c in ["연월", "시도", "연도", "지표", "구분"]]
+                        )
+                        result_df = result_df.sort_values(info["col"]).reset_index(drop=True)
+                        # 병합된 데이터 재저장 (CSV 경로는 각 함수가 이미 저장했으므로 덮어쓰기)
+                        result_df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+
                 new_rows = len(result_df)
                 # 현재 max 시점 확인
                 if info["col"] in result_df.columns:
                     curr_max = str(result_df[info["col"]].dropna().max())
                 else:
                     curr_max = "?"
-
-                # 전체 CSV 기준 행 수 (증분이면 기존 + 신규가 합쳐져 저장됨)
-                # 각 함수가 내부에서 CSV를 직접 덮어쓰므로 실제 행 수는 result_df 크기
-                added = new_rows - (prev_rows or 0) if not incremental else new_rows
 
                 results.append({
                     "label": label,
