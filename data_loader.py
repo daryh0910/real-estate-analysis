@@ -441,7 +441,7 @@ def load_rent_data(rent_type="jeonse", chunksize=500_000, keep_sido=True, force_
     reader = read_csv_auto(
         JEONSE_PATH,
         chunksize=chunksize,
-        dtype={"지역코드": str},
+        dtype=str,
         usecols=["년", "월", "지역코드", "전용면적", "보증금액", "월세금액"],
         on_bad_lines="skip",
     )
@@ -760,7 +760,49 @@ def load_nps_data():
     else:
         df["시도"] = df["시도"].apply(_normalize_sido)
 
+    df = _normalize_nps_snapshot_outliers(df)
     return df
+
+
+def _normalize_nps_snapshot_outliers(df):
+    """Correct obvious scale-doubled NPS snapshot months.
+
+    NPS 가입자수/사업장수 are point-in-time snapshot metrics. Some exported
+    monthly files can contain an entire snapshot at roughly 2x scale while the
+    per-person charge remains normal. Detect those national-level scale spikes
+    and bring count/sum columns back to the surrounding snapshot scale.
+    """
+    if df.empty or "연월" not in df.columns or "NPS_가입자수" not in df.columns:
+        return df
+
+    result = df.copy()
+    monthly_total = pd.to_numeric(result["NPS_가입자수"], errors="coerce").groupby(result["연월"]).sum()
+    baseline = monthly_total[monthly_total > 0].median()
+    if not np.isfinite(baseline) or baseline <= 0:
+        return result
+
+    outlier_months = monthly_total[
+        (monthly_total > baseline * 1.6)
+        & ((monthly_total / 2 - baseline).abs() <= baseline * 0.35)
+    ].index
+    if len(outlier_months) == 0:
+        return result
+
+    scale_cols = ["NPS_가입자수", "NPS_고지금액합계", "NPS_사업장수", "NPS_고용증감"]
+    mask = result["연월"].isin(outlier_months)
+    for col in scale_cols:
+        if col in result.columns:
+            corrected = pd.to_numeric(result.loc[mask, col], errors="coerce") / 2
+            if col in ["NPS_가입자수", "NPS_사업장수", "NPS_고용증감"]:
+                corrected = corrected.round()
+            result.loc[mask, col] = corrected
+
+    if {"NPS_고지금액합계", "NPS_가입자수", "NPS_1인당고지금액"}.issubset(result.columns):
+        denom = pd.to_numeric(result.loc[mask, "NPS_가입자수"], errors="coerce")
+        amount = pd.to_numeric(result.loc[mask, "NPS_고지금액합계"], errors="coerce")
+        result.loc[mask, "NPS_1인당고지금액"] = np.where(denom > 0, amount / denom, np.nan)
+
+    return result
 
 
 def load_housing_loan_data():
@@ -1048,15 +1090,20 @@ def _agg_nps_sido(nps_df, freq="yearly"):
             d["NPS_1인당고지금액"] = np.nan
         return pd.Series(d)
 
-    if freq == "yearly":
-        keys = ["시도", "연도"]
-    else:
-        keys = ["시도", "연도", "월"]
+    monthly = (
+        nps_df.groupby(["시도", "연도", "월"], group_keys=False)
+        .apply(_w_agg, include_groups=False)
+        .reset_index()
+    )
+    monthly["연월"] = monthly["연도"].astype(str) + "-" + monthly["월"].apply(lambda x: f"{x:02d}")
 
-    agg = nps_df.groupby(keys, group_keys=False).apply(_w_agg, include_groups=False).reset_index()
     if freq == "monthly":
-        agg["연월"] = agg["연도"].astype(str) + "-" + agg["월"].apply(lambda x: f"{x:02d}")
-    return agg
+        return monthly
+
+    # NPS 가입자/사업장 수는 누적 유량이 아니라 특정 월 스냅샷이다.
+    # 연간 화면에서는 같은 해 여러 스냅샷을 합산하지 않고 최신 월 값을 사용한다.
+    idx = monthly.groupby(["시도", "연도"])["월"].idxmax()
+    return monthly.loc[idx].drop(columns=["월", "연월"]).reset_index(drop=True)
 
 
 def _agg_rent_sido(rent_df, freq="yearly"):

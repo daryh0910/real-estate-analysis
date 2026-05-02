@@ -22,6 +22,10 @@ from analysis import (
     detect_outliers,
     cluster_regions,
     granger_causality_test,
+    compute_lead_lag_signal,
+    evaluate_condition_rules,
+    prepare_screener_dataset,
+    run_region_backtest,
     compute_value_score,
     compute_market_temperature,
     interpolate_quintile_to_percentile,
@@ -45,6 +49,53 @@ st.set_page_config(
 
 # Streamlit Cloud (Linux) 한글 폰트 기본값 — packages.txt에 fonts-noto-cjk 설치 필요
 PLOTLY_FONT = dict(family="Noto Sans KR, Noto Sans CJK KR, sans-serif", size=12)
+
+
+INDICATOR_CATALOG = [
+    # 가격
+    {"group": "가격", "column": "평균가격", "label": "실거래 평균가격", "source": "실거래", "unit": "만원", "best_for": "실제 거래금액 흐름", "caution": "거래량이 적은 지역은 월별 변동성이 큼"},
+    {"group": "가격", "column": "평균단가_per_m2", "label": "실거래 m²당 가격", "source": "실거래", "unit": "만원/m²", "best_for": "면적 차이를 줄인 지역 비교", "caution": "거래된 평형 구성이 바뀌면 왜곡 가능"},
+    {"group": "가격", "column": "아파트매매가격지수", "label": "BOK 아파트매매가격지수", "source": "BOK", "unit": "지수", "best_for": "장기 가격 흐름 비교", "caution": "실거래 금액이 아니라 지수"},
+    {"group": "가격", "column": "KB_선도50지수", "label": "KB 선도50지수", "source": "KB부동산", "unit": "지수", "best_for": "시장 선행 분위기 확인", "caution": "대표 단지 중심 지수라 지역별 실거래와 다를 수 있음"},
+    # 전세/임대
+    {"group": "전세", "column": "전세_보증금평균", "label": "전세 보증금평균", "source": "실거래", "unit": "만원", "best_for": "전세가격 흐름", "caution": "거래 표본 영향 큼"},
+    {"group": "전세", "column": "전세_보증금단가", "label": "전세 m²당 보증금", "source": "실거래", "unit": "만원/m²", "best_for": "면적 차이를 줄인 전세 비교", "caution": "평형 구성 변화 영향"},
+    {"group": "전세", "column": "아파트전세가격지수", "label": "BOK 아파트전세가격지수", "source": "BOK", "unit": "지수", "best_for": "장기 전세 흐름 비교", "caution": "실거래 보증금이 아니라 지수"},
+    {"group": "전세", "column": "KB_J_PIR", "label": "KB J-PIR", "source": "KB부동산", "unit": "년", "best_for": "전세 부담도 확인", "caution": "제공 지역이 제한적일 수 있음"},
+    {"group": "전세", "column": "월세_월세평균", "label": "월세 평균", "source": "실거래", "unit": "만원/월", "best_for": "월세 부담 확인", "caution": "보증금 수준과 함께 봐야 함"},
+    {"group": "전세", "column": "KB_월세지수", "label": "KB 월세지수", "source": "KB부동산", "unit": "지수", "best_for": "월세 시장 흐름", "caution": "금액이 아니라 지수"},
+    # 거래
+    {"group": "거래", "column": "거래량", "label": "매매 거래량", "source": "실거래", "unit": "건", "best_for": "시장 활성도", "caution": "월별 계절성 영향"},
+    {"group": "거래", "column": "전세_거래량", "label": "전세 거래량", "source": "실거래", "unit": "건", "best_for": "전세 수요 강도", "caution": "계약갱신/신규 구분 한계"},
+    {"group": "거래", "column": "KB_매매거래지수", "label": "KB 매매거래지수", "source": "KB부동산", "unit": "지수", "best_for": "거래 체감 강도", "caution": "실거래 건수가 아니라 지수"},
+    # 수요
+    {"group": "수요", "column": "NPS_가입자수", "label": "NPS 가입자수", "source": "국민연금", "unit": "명", "best_for": "고용 기반 수요", "caution": "직장가입자 중심"},
+    {"group": "수요", "column": "NPS_1인당고지금액", "label": "NPS 1인당고지금액", "source": "국민연금", "unit": "원", "best_for": "지역 소득수준 대리변수", "caution": "고지금액 기반 추정"},
+    {"group": "수요", "column": "가구_소득평균", "label": "가구 소득평균", "source": "KOSIS", "unit": "만원", "best_for": "구매력/PIR 계산", "caution": "시도 단위 중심"},
+    {"group": "수요", "column": "주담대_잔액", "label": "주담대 잔액", "source": "BOK", "unit": "십억원", "best_for": "레버리지 총량", "caution": "가격 상승과 부채 부담 양쪽 의미"},
+    {"group": "수요", "column": "KB_HAI", "label": "KB 주택구매력", "source": "KB부동산", "unit": "지수", "best_for": "구매 가능성", "caution": "제공 지역 제한 가능"},
+    # 공급
+    {"group": "공급", "column": "인허가_호수", "label": "아파트 인허가", "source": "통계청/국토부", "unit": "호", "best_for": "향후 공급 선행", "caution": "입주까지 시차 존재"},
+    {"group": "공급", "column": "착공_호수", "label": "착공 호수", "source": "KOSIS/국토부", "unit": "호", "best_for": "실제 공급 진행", "caution": "준공 전 지연 가능"},
+    {"group": "공급", "column": "준공_호수", "label": "준공 호수", "source": "KOSIS/국토부", "unit": "호", "best_for": "입주 공급 확인", "caution": "지역별 집계 기준 확인 필요"},
+    {"group": "공급", "column": "미분양_호수", "label": "미분양 호수", "source": "BOK/국토부", "unit": "호", "best_for": "공급 부담", "caution": "공표 지연 가능"},
+    {"group": "공급", "column": "미분양소화기간", "label": "미분양 소화기간", "source": "파생", "unit": "개월", "best_for": "미분양 부담을 거래속도로 환산", "caution": "거래량 급감 시 급등 가능"},
+    # 심리/금리
+    {"group": "심리/금리", "column": "기준금리", "label": "기준금리", "source": "BOK", "unit": "%", "best_for": "금융환경", "caution": "대출금리와 직접 일치하지 않음"},
+    {"group": "심리/금리", "column": "국고채_10년", "label": "국고채 10년", "source": "BOK", "unit": "%", "best_for": "장기금리 환경", "caution": "주담대 금리와 시차 존재"},
+    {"group": "심리/금리", "column": "주택가격전망CSI", "label": "주택가격전망CSI", "source": "BOK", "unit": "지수", "best_for": "가격 기대심리", "caution": "심리 지표"},
+    {"group": "심리/금리", "column": "KB_매수우위지수", "label": "KB 매수우위지수", "source": "KB부동산", "unit": "지수", "best_for": "매수/매도 힘 비교", "caution": "설문/지수 성격"},
+    {"group": "심리/금리", "column": "부동산소비심리지수", "label": "부동산소비심리지수", "source": "국토연구원", "unit": "지수", "best_for": "부동산 소비 심리", "caution": "심리 지표"},
+    # 파생
+    {"group": "파생", "column": "PIR", "label": "PIR", "source": "파생", "unit": "배", "best_for": "소득 대비 가격 부담", "caution": "소득 데이터 기준에 좌우"},
+    {"group": "파생", "column": "PIR_NPS", "label": "PIR(NPS 기반)", "source": "파생", "unit": "배", "best_for": "NPS 기반 지역 비교", "caution": "직장가입자 소득 추정"},
+    {"group": "파생", "column": "전세가율", "label": "전세가율", "source": "파생", "unit": "%", "best_for": "매매 대비 전세 지지력", "caution": "매매/전세 표본 차이 영향"},
+    {"group": "파생", "column": "갭비용", "label": "갭투자 비용", "source": "파생", "unit": "만원", "best_for": "전세 끼고 매수 시 필요 현금", "caution": "평균값 기반"},
+    {"group": "파생", "column": "임대수익률", "label": "실질 임대수익률", "source": "파생", "unit": "%", "best_for": "임대 수익 매력", "caution": "세금/공실 미반영"},
+    {"group": "파생", "column": "금리조정PIR", "label": "금리조정 PIR", "source": "파생", "unit": "배", "best_for": "금리 부담 반영 가격 부담", "caution": "단순 조정식"},
+]
+
+INDICATOR_META = {item["column"]: item for item in INDICATOR_CATALOG}
 
 
 def register_fig(name: str, fig, tab_name: str):
@@ -324,10 +375,22 @@ def _compute_formulas(
 
 
 # --- 페이지 구성 ---
-main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6, main_tab7, main_tab8, main_tab9, main_tab10, main_tab11 = st.tabs([
-    "Overview", "시장분석", "지역별 분석", "수요-공급 분석기", "공급분석", "통계분석", "고급분석",
-    "가격 예측", "투자 계산기", "소득-매물 매칭", "커뮤니티 게시판"
+overview_tab, demand_supply_tab, transaction_tab, listing_tab, valuation_tab = st.tabs([
+    "Overview", "수요공급분석", "거래현황", "매물찾기", "자유차트"
 ])
+
+# 기존 11개 화면 블록을 5개 상위 탭으로 재배치한다.
+main_tab1 = overview_tab
+main_tab2 = transaction_tab
+main_tab3 = transaction_tab
+main_tab4 = demand_supply_tab
+main_tab5 = demand_supply_tab
+main_tab6 = valuation_tab
+main_tab7 = valuation_tab
+main_tab8 = valuation_tab
+main_tab9 = valuation_tab
+main_tab10 = listing_tab
+main_tab11 = listing_tab
 
 # ============================
 # Tab 1: Overview
@@ -344,8 +407,246 @@ def _cached_rank_sigungu(_apt_df, _nps_df, year):
     """시군구 급지순위 캐싱"""
     return rank_sigungu_grade(_apt_df, _nps_df, year=year)
 
+
+def normalize_naver_listings(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """네이버 매물 CSV/JSON 응답을 앱 표준 매물 스키마로 정규화."""
+    if raw_df is None or raw_df.empty:
+        return pd.DataFrame()
+
+    col_aliases = {
+        "수집일": ["수집일", "collected_at", "collectionDate"],
+        "시도": ["시도", "sido", "city"],
+        "시군구": ["시군구", "sigungu", "district"],
+        "단지명": ["단지명", "complexName", "단지", "아파트명", "articleName"],
+        "거래유형": ["거래유형", "tradeTypeName", "거래방식", "매매구분"],
+        "매물가격": ["매물가격", "price", "dealOrWarrantPrc", "매매가", "호가"],
+        "면적": ["면적", "area", "공급면적", "exclusiveAreaName"],
+        "층": ["층", "floorInfo", "floor"],
+        "매물URL": ["매물URL", "url", "articleUrl", "link"],
+        "동": ["동", "buildingName"],
+        "향": ["향", "direction"],
+        "중개사": ["중개사", "realtorName"],
+        "확인일": ["확인일", "articleConfirmYmd", "확인매물일"],
+        "비고": ["비고", "note", "description"],
+    }
+
+    normalized = pd.DataFrame()
+    for target_col, aliases in col_aliases.items():
+        source_col = next((c for c in aliases if c in raw_df.columns), None)
+        normalized[target_col] = raw_df[source_col] if source_col else np.nan
+
+    normalized["단지명"] = normalized["단지명"].astype(str).str.strip()
+    normalized["시군구"] = normalized["시군구"].astype(str).str.strip()
+    normalized["거래유형"] = normalized["거래유형"].fillna("매매").astype(str).str.strip()
+    normalized["매물가격"] = (
+        normalized["매물가격"].astype(str)
+        .str.replace(",", "", regex=False)
+        .str.replace("만원", "", regex=False)
+        .str.extract(r"([\d.]+)")[0]
+        .astype(float)
+    )
+    normalized = normalized.dropna(subset=["단지명", "매물가격"], how="any")
+    return normalized.reset_index(drop=True)
+
+
+def parse_naver_listing_upload(uploaded_file) -> pd.DataFrame:
+    """업로드된 CSV/JSON 파일을 표준 매물 테이블로 변환."""
+    if uploaded_file is None:
+        return pd.DataFrame()
+    try:
+        name = uploaded_file.name.lower()
+        if name.endswith(".json"):
+            raw = json.load(uploaded_file)
+            if isinstance(raw, dict):
+                raw = raw.get("articleList") or raw.get("data") or raw.get("items") or [raw]
+            raw_df = pd.DataFrame(raw)
+        else:
+            raw_df = pd.read_csv(uploaded_file)
+        return normalize_naver_listings(raw_df)
+    except Exception as e:
+        st.warning(f"네이버 매물 파일을 해석할 수 없습니다: {e}")
+        return pd.DataFrame()
+
+
+def _fmt_var_by_col(col):
+    """변수 메타데이터가 정의되기 전에도 화면이 실행되도록 하는 기본 포맷터."""
+    meta = INDICATOR_META.get(str(col))
+    if meta:
+        return f"[{meta['source']}] {meta['label']}"
+    return str(col)
+
+
+def _indicator_label(col):
+    meta = INDICATOR_META.get(str(col))
+    return meta["label"] if meta else str(col)
+
+
+def _available_indicator_options(df, groups=None, include_text=False):
+    if df is None or df.empty:
+        return []
+    cols = []
+    groups = set(groups) if groups else None
+    for item in INDICATOR_CATALOG:
+        col = item["column"]
+        if groups and item["group"] not in groups:
+            continue
+        if col in df.columns and df[col].notna().any():
+            if include_text or pd.api.types.is_numeric_dtype(df[col]):
+                cols.append(col)
+    extra_numeric = [
+        c for c in _numeric_rule_columns(df)
+        if c not in cols and c not in {"연도", "월", "연월", "지역코드"}
+    ]
+    return cols + extra_numeric
+
+
+def _render_indicator_picker(label, df, key, groups=None, default=None, multi=False, allow_extra_numeric=True):
+    options = _available_indicator_options(df, groups=groups)
+    if allow_extra_numeric:
+        for col in _numeric_rule_columns(df):
+            if col not in options:
+                options.append(col)
+    if not options:
+        return [] if multi else None
+
+    def _default_index():
+        if default in options:
+            return options.index(default)
+        return 0
+
+    if multi:
+        default_list = [c for c in (default or []) if c in options]
+        return st.multiselect(label, options, default=default_list, key=key, format_func=_fmt_var_by_col)
+
+    selected = st.selectbox(label, options, index=_default_index(), key=key, format_func=_fmt_var_by_col)
+    meta = INDICATOR_META.get(str(selected))
+    if meta:
+        st.caption(f"단위: {meta['unit']} | 용도: {meta['best_for']} | 주의: {meta['caution']}")
+    return selected
+
+
+def _render_grouped_indicator_picker(label, df, key, default_group="가격", default=None, multi=False):
+    available_groups = []
+    for item in INDICATOR_CATALOG:
+        if item["group"] not in available_groups and item["column"] in df.columns and df[item["column"]].notna().any():
+            available_groups.append(item["group"])
+    if not available_groups:
+        return [] if multi else None
+    group_index = available_groups.index(default_group) if default_group in available_groups else 0
+    group = st.selectbox(f"{label} 지표군", available_groups, index=group_index, key=f"{key}_group")
+    return _render_indicator_picker(label, df, key, groups=[group], default=default, multi=multi, allow_extra_numeric=False)
+
+
+def _source_caption(cols):
+    items = []
+    for col in cols:
+        meta = INDICATOR_META.get(str(col))
+        if meta:
+            items.append(f"{meta['label']}({meta['source']})")
+        else:
+            items.append(str(col))
+    return "출처: " + ", ".join(dict.fromkeys(items))
+
+
+def _numeric_rule_columns(df):
+    excluded = {"연도", "월", "연월", "지역코드"}
+    return [
+        c for c in df.columns
+        if c not in excluded and pd.api.types.is_numeric_dtype(df[c]) and df[c].notna().any()
+    ]
+
+
+def _render_condition_builder(prefix, candidate_cols, default_rules=None, max_rules=5):
+    """지역검색기와 전략검증에서 공유하는 조건 빌더."""
+    default_rules = default_rules or []
+    candidate_cols = list(dict.fromkeys([c for c in candidate_cols if c]))
+    if not candidate_cols:
+        return [], "AND"
+
+    combine_label = st.radio(
+        "조건 조합",
+        ["모두 만족 (AND)", "하나라도 만족 (OR)"],
+        horizontal=True,
+        key=f"{prefix}_combine_label",
+    )
+    combine = "OR" if "OR" in combine_label else "AND"
+
+    rules = []
+    ops = [">", ">=", "<", "<=", "between", "==", "contains"]
+    for i in range(max_rules):
+        default = default_rules[i] if i < len(default_rules) else {}
+        with st.expander(f"조건 {i + 1}", expanded=i < max(1, len(default_rules))):
+            enabled = st.checkbox("사용", value=i < len(default_rules), key=f"{prefix}_rule_enabled_{i}")
+            if not enabled:
+                continue
+            c0, c1, c2, c3, c4 = st.columns([1.4, 2.2, 1.1, 1.3, 1.3])
+            catalog_groups = []
+            for item in INDICATOR_CATALOG:
+                if item["column"] in candidate_cols and item["group"] not in catalog_groups:
+                    catalog_groups.append(item["group"])
+            fallback_cols = [c for c in candidate_cols if c not in INDICATOR_META]
+            default_col = default.get("column", candidate_cols[0])
+            default_group = INDICATOR_META.get(default_col, {}).get("group", catalog_groups[0] if catalog_groups else "(기타)")
+            with c0:
+                group_options = catalog_groups + (["(기타)"] if fallback_cols else [])
+                group_index = group_options.index(default_group) if default_group in group_options else 0
+                selected_group = st.selectbox("지표군", group_options, index=group_index, key=f"{prefix}_rule_group_{i}")
+            with c1:
+                group_cols = [
+                    item["column"] for item in INDICATOR_CATALOG
+                    if item["group"] == selected_group and item["column"] in candidate_cols
+                ] if selected_group != "(기타)" else fallback_cols
+                group_cols = group_cols or candidate_cols
+                col_index = group_cols.index(default_col) if default_col in group_cols else 0
+                column = st.selectbox(
+                    "지표",
+                    group_cols,
+                    index=col_index,
+                    key=f"{prefix}_rule_col_{i}",
+                    format_func=_fmt_var_by_col,
+                )
+                meta = INDICATOR_META.get(str(column))
+                if meta:
+                    st.caption(f"{meta['source']} | {meta['unit']} | {meta['best_for']}")
+            with c2:
+                default_op = default.get("op", ">")
+                op = st.selectbox(
+                    "조건",
+                    ops,
+                    index=ops.index(default_op) if default_op in ops else 0,
+                    key=f"{prefix}_rule_op_{i}",
+                )
+            with c3:
+                value = st.text_input(
+                    "값",
+                    value=str(default.get("value", "")),
+                    key=f"{prefix}_rule_value_{i}",
+                    placeholder="예: 15 또는 전세 선행",
+                )
+            with c4:
+                value2 = st.text_input(
+                    "상한",
+                    value=str(default.get("value2", "")),
+                    key=f"{prefix}_rule_value2_{i}",
+                    placeholder="between일 때",
+                    disabled=op != "between",
+                )
+            if value.strip():
+                rules.append({"column": column, "op": op, "value": value.strip(), "value2": value2.strip()})
+    return rules, combine
+
+
+def _format_signal_summary(row):
+    if row is None or pd.isna(row.get("선행방향", np.nan)):
+        return "선행 신호 없음"
+    direction = row.get("선행방향", "")
+    lead = row.get("먼저움직인기간", 0)
+    consistency = row.get("반복성", "")
+    return f"{direction} {int(lead)}기간, 반복성 {consistency}"
+
 with main_tab1:
     st.header(f"시장 Overview ({mode_label})")
+    st.caption("역사는 반복된다는 관점에서 과거 국면, 수요·공급의 움직임, 현재와 닮은 신호를 한 화면에서 추적합니다.")
 
     # ──────────────────────────────────────────────────
     # Zone A: 시장 온도계 (Hero Section)
@@ -620,147 +921,335 @@ with main_tab1:
     st.subheader("핵심 트렌드")
     _ov_tc = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
 
+    def _trend_index_100(df, time_col, value_cols):
+        """각 지표를 첫 유효값=100으로 변환해 단위가 다른 지표를 한 차트에서 비교."""
+        idx_df = df[[time_col] + value_cols].copy()
+        for _col in value_cols:
+            _valid = idx_df[_col].replace([np.inf, -np.inf], np.nan).dropna()
+            _base = _valid.iloc[0] if not _valid.empty else np.nan
+            idx_df[_col] = np.where(
+                pd.notna(_base) and _base != 0,
+                idx_df[_col] / _base * 100,
+                np.nan,
+            )
+        return idx_df
+
     _trend_c1, _trend_c2 = st.columns(2)
 
-    # (1,1) 가격 + 거래량 듀얼축
+    # (1,1) 수요 데이터: 인구, 30대 인구, 일자리
     with _trend_c1:
         try:
-            if analysis_mode == "매매 분석":
-                _tc_price_col = "평균가격"
-                _tc_vol_col   = "거래량"
-                _tc_df = filtered_apt
-            else:
-                _tc_price_col = price_col
-                _tc_vol_col   = vol_col
-                _tc_df = analysis_df
+            _demand_map = {
+                "총인구": "총인구",
+                "30대 인구": "30대",
+                "일자리": next((c for c in ["NPS_가입자수", "NPS_사업장수", "NPS_고용증감"] if c in analysis_df.columns and analysis_df[c].notna().any()), None),
+            }
+            _demand_aggs = {
+                label: (col, "mean")
+                for label, col in _demand_map.items()
+                if col and col in analysis_df.columns and analysis_df[col].notna().any()
+            }
+            if _demand_aggs:
+                _demand_df = analysis_df.groupby(_ov_tc).agg(**_demand_aggs).reset_index().sort_values(_ov_tc)
+                _demand_cols = [c for c in ["총인구", "30대 인구", "일자리"] if c in _demand_df.columns]
+                _demand_idx = _trend_index_100(_demand_df, _ov_tc, _demand_cols)
+                _demand_melted = _demand_idx.melt(id_vars=[_ov_tc], value_vars=_demand_cols, var_name="지표", value_name="Index")
 
-            if not _tc_df.empty and _tc_price_col in _tc_df.columns and _tc_vol_col in _tc_df.columns:
-                _tc_grp = _tc_df.groupby(_ov_tc).agg(
-                    가격평균=(_tc_price_col, "mean"),
-                    거래량합=(_tc_vol_col, "sum"),
-                ).reset_index().sort_values(_ov_tc)
-
-                fig_pv = make_subplots(specs=[[{"secondary_y": True}]])
-                fig_pv.add_trace(
-                    go.Scatter(x=_tc_grp[_ov_tc], y=_tc_grp["가격평균"], name="평균가격", line=dict(color="royalblue")),
-                    secondary_y=False,
+                fig_demand = px.line(
+                    _demand_melted.dropna(subset=["Index"]),
+                    x=_ov_tc, y="Index", color="지표",
+                    title="수요 데이터: 인구·30대 인구·일자리 (Index=100)",
+                    markers=True,
+                    color_discrete_sequence=["#2563eb", "#16a34a", "#f59e0b"],
                 )
-                fig_pv.add_trace(
-                    go.Bar(x=_tc_grp[_ov_tc], y=_tc_grp["거래량합"], name="거래량", marker_color="lightsteelblue", opacity=0.5),
-                    secondary_y=True,
-                )
-                fig_pv.update_layout(title_text="가격 & 거래량 추이", height=350, legend=dict(orientation="h"))
-                fig_pv.update_yaxes(title_text="평균가격(만원)", secondary_y=False)
-                fig_pv.update_yaxes(title_text="거래량(건)", secondary_y=True)
-                register_fig("가격거래량_듀얼", fig_pv, "Overview")
-                st.plotly_chart(fig_pv, use_container_width=True)
+                fig_demand.update_layout(height=350, legend=dict(orientation="h"))
+                fig_demand.update_yaxes(title_text="Index (첫 유효 시점=100)")
+                register_fig("핵심트렌드_수요", fig_demand, "Overview")
+                st.plotly_chart(fig_demand, use_container_width=True)
             else:
-                st.info("가격/거래량 데이터 없음")
+                st.info("수요 데이터(인구, 30대 인구, 일자리)가 없습니다.")
         except Exception as e:
-            st.error(f"가격·거래량 차트 오류: {e}")
+            st.error(f"수요 데이터 차트 오류: {e}")
 
-    # (1,2) 금리 vs 전세가율 듀얼축
+    # (1,2) 공급 데이터: 인허가, 착공, 준공, 미분양
     with _trend_c2:
         try:
-            _rate_col    = next((c for c in ["기준금리", "CD_91일", "국고채_3년"] if c in analysis_df.columns and analysis_df[c].notna().any()), None)
-            _jeonse_rate = "전세가율" if "전세가율" in analysis_df.columns and analysis_df["전세가율"].notna().any() else None
+            _supply_cols = [c for c in ["인허가_호수", "착공_호수", "준공_호수"] if c in analysis_df.columns and analysis_df[c].notna().any()]
+            _unsold_col = next((c for c in ["미분양_호수", "미분양_평균"] if c in analysis_df.columns and analysis_df[c].notna().any()), None)
 
-            if _rate_col and _jeonse_rate:
-                _rj_df = analysis_df.groupby(_ov_tc).agg(
-                    금리=(_rate_col, "mean"),
-                    전세가율=(_jeonse_rate, "mean"),
-                ).reset_index().sort_values(_ov_tc)
+            if _supply_cols or _unsold_col:
+                _supply_fig = make_subplots(specs=[[{"secondary_y": True}]])
+                for _col, _color in zip(_supply_cols, ["#2563eb", "#7c3aed", "#16a34a"]):
+                    _sdf = analysis_df.groupby(_ov_tc)[_col].sum().reset_index().sort_values(_ov_tc)
+                    _supply_fig.add_trace(
+                        go.Scatter(x=_sdf[_ov_tc], y=_sdf[_col], name=_col.replace("_호수", ""), line=dict(color=_color), mode="lines+markers"),
+                        secondary_y=False,
+                    )
+                if _unsold_col:
+                    _udf = analysis_df.groupby(_ov_tc)[_unsold_col].mean().reset_index().sort_values(_ov_tc)
+                    _supply_fig.add_trace(
+                        go.Bar(x=_udf[_ov_tc], y=_udf[_unsold_col], name="미분양", marker_color="#ef4444", opacity=0.35),
+                        secondary_y=True,
+                    )
 
-                fig_rj = make_subplots(specs=[[{"secondary_y": True}]])
-                fig_rj.add_trace(
-                    go.Scatter(x=_rj_df[_ov_tc], y=_rj_df["금리"], name=_rate_col, line=dict(color="tomato")),
-                    secondary_y=False,
-                )
-                fig_rj.add_trace(
-                    go.Scatter(x=_rj_df[_ov_tc], y=_rj_df["전세가율"], name="전세가율", line=dict(color="seagreen", dash="dash")),
-                    secondary_y=True,
-                )
-                fig_rj.update_layout(title_text=f"{_rate_col} vs 전세가율", height=350, legend=dict(orientation="h"))
-                fig_rj.update_yaxes(title_text=f"{_rate_col}(%)", secondary_y=False)
-                fig_rj.update_yaxes(title_text="전세가율(%)", secondary_y=True)
-                register_fig("금리_전세가율_듀얼", fig_rj, "Overview")
-                st.plotly_chart(fig_rj, use_container_width=True)
+                _supply_fig.update_layout(title_text="공급 데이터: 인허가·착공·준공·미분양", height=350, legend=dict(orientation="h"))
+                _supply_fig.update_yaxes(title_text="공급 물량(호)", secondary_y=False)
+                if _unsold_col:
+                    _supply_fig.update_yaxes(title_text="미분양(호)", secondary_y=True)
+                register_fig("핵심트렌드_공급", _supply_fig, "Overview")
+                st.plotly_chart(_supply_fig, use_container_width=True)
             else:
-                st.info("금리 또는 전세가율 데이터 없음")
+                st.info("공급 데이터(인허가, 착공, 준공, 미분양)가 없습니다.")
         except Exception as e:
-            st.error(f"금리·전세가율 차트 오류: {e}")
+            st.error(f"공급 데이터 차트 오류: {e}")
 
     _trend_c3, _trend_c4 = st.columns(2)
 
-    # (2,1) 미분양 + 인허가 추이
+    # (2,1) 2차 가공 데이터: PIR, J-PIR, 전세가율, 갭
     with _trend_c3:
         try:
-            _unsold_col = next((c for c in ["미분양_평균", "미분양_호수"] if c in analysis_df.columns and analysis_df[c].notna().any()), None)
-            _permit_col = "인허가_호수" if "인허가_호수" in analysis_df.columns and analysis_df["인허가_호수"].notna().any() else None
+            _derived_map = {
+                "PIR": next((c for c in ["PIR", "PIR_NPS", "KB_PIR"] if c in analysis_df.columns and analysis_df[c].notna().any()), None),
+                "J-PIR": "KB_J_PIR" if "KB_J_PIR" in analysis_df.columns and analysis_df["KB_J_PIR"].notna().any() else None,
+                "전세가율": "전세가율" if "전세가율" in analysis_df.columns and analysis_df["전세가율"].notna().any() else None,
+                "갭비용": "갭비용" if "갭비용" in analysis_df.columns and analysis_df["갭비용"].notna().any() else None,
+            }
+            _derived_aggs = {
+                label: (col, "mean")
+                for label, col in _derived_map.items()
+                if col and col in analysis_df.columns and analysis_df[col].notna().any()
+            }
+            if _derived_aggs:
+                _derived_df = analysis_df.groupby(_ov_tc).agg(**_derived_aggs).reset_index().sort_values(_ov_tc)
+                _derived_cols = [c for c in ["PIR", "J-PIR", "전세가율", "갭비용"] if c in _derived_df.columns]
+                _derived_idx = _trend_index_100(_derived_df, _ov_tc, _derived_cols)
+                _derived_melted = _derived_idx.melt(id_vars=[_ov_tc], value_vars=_derived_cols, var_name="지표", value_name="Index")
 
-            if _unsold_col or _permit_col:
-                _up_fig = make_subplots(specs=[[{"secondary_y": True}]])
-                if _unsold_col:
-                    _up_df = analysis_df.groupby(_ov_tc)[_unsold_col].mean().reset_index().sort_values(_ov_tc)
-                    _up_fig.add_trace(
-                        go.Bar(x=_up_df[_ov_tc], y=_up_df[_unsold_col], name="미분양", marker_color="salmon", opacity=0.7),
-                        secondary_y=False,
-                    )
-                if _permit_col:
-                    _pp_df = analysis_df.groupby(_ov_tc)[_permit_col].sum().reset_index().sort_values(_ov_tc)
-                    _up_fig.add_trace(
-                        go.Scatter(x=_pp_df[_ov_tc], y=_pp_df[_permit_col], name="인허가", line=dict(color="steelblue")),
-                        secondary_y=True,
-                    )
-                _up_fig.update_layout(title_text="미분양 & 인허가 추이", height=350, legend=dict(orientation="h"))
-                if _unsold_col:
-                    _up_fig.update_yaxes(title_text=f"{_unsold_col}(호)", secondary_y=False)
-                if _permit_col:
-                    _up_fig.update_yaxes(title_text="인허가(호)", secondary_y=True)
-                register_fig("미분양_인허가_추이", _up_fig, "Overview")
-                st.plotly_chart(_up_fig, use_container_width=True)
+                fig_derived = px.line(
+                    _derived_melted.dropna(subset=["Index"]),
+                    x=_ov_tc, y="Index", color="지표",
+                    title="2차가공 데이터: PIR·J-PIR·전세가율·갭 (Index=100)",
+                    markers=True,
+                    color_discrete_sequence=["#dc2626", "#9333ea", "#059669", "#475569"],
+                )
+                fig_derived.update_layout(height=350, legend=dict(orientation="h"))
+                fig_derived.update_yaxes(title_text="Index (첫 유효 시점=100)")
+                register_fig("핵심트렌드_2차가공", fig_derived, "Overview")
+                st.plotly_chart(fig_derived, use_container_width=True)
             else:
-                st.info("미분양/인허가 데이터 없음")
+                st.info("2차가공 데이터(PIR, J-PIR, 전세가율, 갭)가 없습니다.")
         except Exception as e:
-            st.error(f"미분양·인허가 차트 오류: {e}")
+            st.error(f"2차가공 데이터 차트 오류: {e}")
 
-    # (2,2) 소득 vs 가격변화율 듀얼축
+    # (2,2) 최근 실거래 데이터: 매매 평균가격과 거래량
     with _trend_c4:
         try:
-            _income_col = next((c for c in ["NPS_1인당고지금액", "가구_소득평균", "1인당총급여_백만원"] if c in analysis_df.columns and analysis_df[c].notna().any()), None)
-            _mom_col    = "가격변화율_YoY" if "가격변화율_YoY" in analysis_df.columns and analysis_df["가격변화율_YoY"].notna().any() else None
+            _deal_df = filtered_apt.copy() if analysis_mode == "매매 분석" else filtered_rent.copy()
+            _deal_price_col = "평균가격" if analysis_mode == "매매 분석" else "보증금평균"
+            _deal_vol_col = "거래량" if analysis_mode == "매매 분석" else "임대거래량"
+            _deal_time_col = "연월" if "연월" in _deal_df.columns else "연도"
 
-            if _income_col or _mom_col:
-                _im_fig = make_subplots(specs=[[{"secondary_y": True}]])
-                if _income_col:
-                    _id_df = analysis_df.groupby(_ov_tc)[_income_col].mean().reset_index().sort_values(_ov_tc)
-                    _im_fig.add_trace(
-                        go.Scatter(x=_id_df[_ov_tc], y=_id_df[_income_col], name=_income_col, line=dict(color="goldenrod")),
-                        secondary_y=False,
+            if not _deal_df.empty and _deal_price_col in _deal_df.columns and _deal_vol_col in _deal_df.columns:
+                _recent_periods = sorted(_deal_df[_deal_time_col].dropna().unique())[-24:]
+                _deal_df = _deal_df[_deal_df[_deal_time_col].isin(_recent_periods)]
+                _deal_grp = (
+                    _deal_df.groupby(_deal_time_col)
+                    .agg(평균가격=(_deal_price_col, "mean"), 거래량=(_deal_vol_col, "sum"))
+                    .reset_index()
+                    .sort_values(_deal_time_col)
+                )
+
+                fig_deal = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_deal.add_trace(
+                    go.Scatter(x=_deal_grp[_deal_time_col], y=_deal_grp["평균가격"], name="평균가격", line=dict(color="#2563eb"), mode="lines+markers"),
+                    secondary_y=False,
+                )
+                fig_deal.add_trace(
+                    go.Bar(x=_deal_grp[_deal_time_col], y=_deal_grp["거래량"], name="거래량", marker_color="#94a3b8", opacity=0.55),
+                    secondary_y=True,
+                )
+                fig_deal.update_layout(title_text=f"최근 실거래 데이터: {mode_label} 가격·거래량", height=350, legend=dict(orientation="h"))
+                fig_deal.update_yaxes(title_text="평균가격(만원)", secondary_y=False)
+                fig_deal.update_yaxes(title_text="거래량(건)", secondary_y=True)
+                register_fig("핵심트렌드_최근실거래", fig_deal, "Overview")
+                st.plotly_chart(fig_deal, use_container_width=True)
+
+                with st.expander("최근월 시군구 실거래 요약"):
+                    _latest_period = _deal_df[_deal_time_col].max()
+                    _latest_deals = _deal_df[_deal_df[_deal_time_col] == _latest_period].copy()
+                    _deal_summary = (
+                        _latest_deals.groupby(["지역코드"], as_index=False)
+                        .agg(평균가격=(_deal_price_col, "mean"), 거래량=(_deal_vol_col, "sum"))
+                        .sort_values("거래량", ascending=False)
                     )
-                if _mom_col:
-                    _md_df = analysis_df.groupby(_ov_tc)[_mom_col].mean().reset_index().sort_values(_ov_tc)
-                    _im_fig.add_trace(
-                        go.Scatter(x=_md_df[_ov_tc], y=_md_df[_mom_col], name="가격변화율(YoY)", line=dict(color="mediumpurple", dash="dot")),
-                        secondary_y=True,
+                    _deal_summary["시군구명"] = _deal_summary["지역코드"].apply(get_sigungu_name)
+                    if "시도" in _latest_deals.columns:
+                        _deal_summary["시도"] = _deal_summary["지역코드"].map(
+                            _latest_deals.drop_duplicates("지역코드").set_index("지역코드")["시도"]
+                        )
+                    _deal_cols = [c for c in ["시군구명", "시도", "평균가격", "거래량"] if c in _deal_summary.columns]
+                    st.caption(f"기준 기간: {_latest_period}")
+                    st.dataframe(
+                        _deal_summary[_deal_cols].head(20).style.format({"평균가격": "{:,.0f}", "거래량": "{:,.0f}"}, na_rep="N/A"),
+                        use_container_width=True,
+                        height=260,
                     )
-                _im_fig.update_layout(title_text="소득 vs 가격변화율", height=350, legend=dict(orientation="h"))
-                if _income_col:
-                    _im_fig.update_yaxes(title_text=f"{_income_col}", secondary_y=False)
-                if _mom_col:
-                    _im_fig.update_yaxes(title_text="가격변화율(%)", secondary_y=True)
-                register_fig("소득_가격모멘텀", _im_fig, "Overview")
-                st.plotly_chart(_im_fig, use_container_width=True)
             else:
-                st.info("소득/가격변화율 데이터 없음")
+                st.info("최근 실거래 데이터가 없습니다.")
         except Exception as e:
-            st.error(f"소득·가격변화율 차트 오류: {e}")
+            st.error(f"최근 실거래 차트 오류: {e}")
+
+    st.divider()
+
+    # ──────────────────────────────────────────────────
+    # Zone D: 역사 흐름과 반복 신호
+    # ──────────────────────────────────────────────────
+    st.subheader("역사 흐름: 가격은 어떤 수요·공급 국면 뒤에 움직였나")
+    try:
+        _hist_src = yearly_df.copy()
+        if selected_sido and "시도" in _hist_src.columns:
+            _hist_src = _hist_src[_hist_src["시도"].isin(selected_sido)]
+
+        _hist_time_col = "연도"
+        _hist_price_col = "평균가격" if "평균가격" in _hist_src.columns else None
+        _hist_demand_cols = [c for c in ["총인구", "30대", "NPS_가입자수", "NPS_사업장수", "NPS_고용증감", "가구_소득평균"] if c in _hist_src.columns and _hist_src[c].notna().any()]
+        _hist_supply_cols = [c for c in ["인허가_호수", "착공_호수", "준공_호수", "미분양_평균"] if c in _hist_src.columns and _hist_src[c].notna().any()]
+
+        if not _hist_src.empty and _hist_price_col and (_hist_demand_cols or _hist_supply_cols):
+            _hist_aggs = {"가격": (_hist_price_col, "mean")}
+            for _col in _hist_demand_cols:
+                _hist_aggs[_col] = (_col, "mean")
+            for _col in _hist_supply_cols:
+                _hist_aggs[_col] = (_col, "sum" if _col != "미분양_평균" else "mean")
+
+            _hist_df = _hist_src.groupby(_hist_time_col).agg(**_hist_aggs).reset_index().sort_values(_hist_time_col)
+            _hist_df["가격변화율"] = _hist_df["가격"].pct_change() * 100
+            _hist_df["국면"] = np.select(
+                [
+                    _hist_df["가격변화율"] >= 5,
+                    _hist_df["가격변화율"] <= -3,
+                ],
+                ["상승기", "하락기"],
+                default="중립기",
+            )
+
+            _hist_idx_cols = ["가격"] + _hist_demand_cols + _hist_supply_cols
+            _hist_idx = _trend_index_100(_hist_df, _hist_time_col, _hist_idx_cols)
+            _hist_long = _hist_idx.melt(id_vars=[_hist_time_col], value_vars=_hist_idx_cols, var_name="지표", value_name="Index")
+
+            fig_history = px.line(
+                _hist_long.dropna(subset=["Index"]),
+                x=_hist_time_col, y="Index", color="지표",
+                title="연도별 가격·수요·공급 흐름 (Index=100)",
+                markers=True,
+            )
+            for _, _row in _hist_df.dropna(subset=["가격변화율"]).iterrows():
+                if _row["국면"] in ("상승기", "하락기"):
+                    _color = "rgba(239,68,68,0.10)" if _row["국면"] == "상승기" else "rgba(37,99,235,0.10)"
+                    fig_history.add_vrect(
+                        x0=_row[_hist_time_col] - 0.45,
+                        x1=_row[_hist_time_col] + 0.45,
+                        fillcolor=_color,
+                        line_width=0,
+                        layer="below",
+                    )
+            fig_history.update_layout(height=430, legend=dict(orientation="h"))
+            fig_history.update_yaxes(title_text="Index (첫 유효 연도=100)")
+            register_fig("역사흐름_가격수요공급", fig_history, "Overview")
+            st.plotly_chart(fig_history, use_container_width=True)
+
+            _latest_hist = _hist_df.dropna(subset=["가격변화율"]).tail(1)
+            _rise_years = _hist_df[_hist_df["국면"] == "상승기"][_hist_time_col].astype(str).tolist()
+            _fall_years = _hist_df[_hist_df["국면"] == "하락기"][_hist_time_col].astype(str).tolist()
+            _flow_c1, _flow_c2, _flow_c3 = st.columns(3)
+            with _flow_c1:
+                st.metric("최근 가격 국면", _latest_hist["국면"].iloc[0] if not _latest_hist.empty else "N/A")
+            with _flow_c2:
+                st.metric("상승 반복 연도", f"{len(_rise_years)}회")
+                st.caption(", ".join(_rise_years[-6:]) if _rise_years else "해당 없음")
+            with _flow_c3:
+                st.metric("하락 반복 연도", f"{len(_fall_years)}회")
+                st.caption(", ".join(_fall_years[-6:]) if _fall_years else "해당 없음")
+
+            with st.expander("연도별 수요·공급 원천 테이블"):
+                _hist_disp_cols = [_hist_time_col, "국면", "가격", "가격변화율"] + _hist_demand_cols + _hist_supply_cols
+                st.dataframe(
+                    _hist_df[_hist_disp_cols].style.format({c: "{:,.1f}" for c in _hist_disp_cols if c not in [_hist_time_col, "국면"]}, na_rep="N/A"),
+                    use_container_width=True,
+                    height=320,
+                )
+        else:
+            st.info("역사 흐름을 그릴 가격·수요·공급 연간 데이터가 부족합니다.")
+    except Exception as e:
+        st.error(f"역사 흐름 분석 오류: {e}")
+
+    st.divider()
+    st.subheader("데이터 출처 및 최신성")
+    source_rows = []
+    for item in INDICATOR_CATALOG:
+        col = item["column"]
+        if col not in analysis_df.columns and col not in yearly_df.columns and col not in monthly_df.columns:
+            continue
+        src_df = analysis_df if col in analysis_df.columns else (monthly_df if col in monthly_df.columns else yearly_df)
+        if src_df.empty or col not in src_df.columns:
+            continue
+        time_col_src = "연월" if "연월" in src_df.columns else ("연도" if "연도" in src_df.columns else None)
+        latest = src_df[time_col_src].dropna().max() if time_col_src else "N/A"
+        region_count = src_df["시도"].nunique() if "시도" in src_df.columns else np.nan
+        miss = src_df[col].isna().mean() * 100 if len(src_df) else np.nan
+        source_rows.append({
+            "지표군": item["group"],
+            "지표": item["label"],
+            "출처": item["source"],
+            "단위": item["unit"],
+            "최신 기준": latest,
+            "지역 수": region_count,
+            "행 수": len(src_df),
+            "결측률(%)": miss,
+            "용도": item["best_for"],
+        })
+    if source_rows:
+        source_df = pd.DataFrame(source_rows).drop_duplicates(["지표", "출처"])
+        st.dataframe(
+            source_df.style.format({"결측률(%)": "{:.1f}", "지역 수": "{:,.0f}", "행 수": "{:,.0f}"}, na_rep="N/A"),
+            use_container_width=True,
+            height=320,
+        )
+    else:
+        st.info("표시할 데이터 출처 정보가 없습니다.")
 
 
 # ============================
 # Tab 2: 시장분석 (시계열비교 + 가격비교 + 갭분석)
 # ============================
 with main_tab2:
+    st.header("거래현황")
+    st.caption("실거래 흐름과 네이버 매물 호가를 같은 지역/단지 단위로 비교합니다.")
+
+    _naver_upload = st.file_uploader(
+        "네이버부동산 매물 CSV/JSON 업로드",
+        type=["csv", "json"],
+        key="naver_listing_upload",
+        help="반자동 수집 결과나 저장한 응답 파일을 업로드하면 표준 매물 테이블로 정규화합니다.",
+    )
+    if _naver_upload is not None:
+        st.session_state["naver_listings_df"] = parse_naver_listing_upload(_naver_upload)
+
+    _naver_df = st.session_state.get("naver_listings_df", pd.DataFrame())
+    if not _naver_df.empty:
+        _n1, _n2, _n3 = st.columns(3)
+        _n1.metric("업로드 매물", f"{len(_naver_df):,}건")
+        _n2.metric("단지 수", f"{_naver_df['단지명'].nunique():,}개")
+        _n3.metric("평균 호가", f"{_naver_df['매물가격'].mean():,.0f}만원")
+        with st.expander("네이버 매물 표준 테이블"):
+            st.dataframe(
+                _naver_df.style.format({"매물가격": "{:,.0f}"}, na_rep="N/A"),
+                use_container_width=True,
+                height=260,
+            )
+    else:
+        st.info("네이버 매물 데이터가 없으면 실거래 중심으로 표시됩니다. 매물 파일을 업로드하면 호가 비교가 활성화됩니다.")
+
     sub_ts, sub_price_cmp, sub_gap = st.tabs(["시계열 비교", "가격비교", "갭분석"])
 
 # ── 시계열 비교 서브탭 ──────────────────────────────────────────────
@@ -774,17 +1263,29 @@ with sub_ts:
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            left_var = st.selectbox("좌측 Y축 (결과)", [v for v in result_vars if v in valid_vars_ts], key="left", format_func=_fmt_var_by_col)
+            left_var = _render_grouped_indicator_picker(
+                "좌측 Y축",
+                analysis_df,
+                "left",
+                default_group="가격" if analysis_mode == "매매 분석" else "전세",
+                default=price_col,
+            )
         with col2:
             right_candidates = [v for v in valid_vars_ts if v != left_var]
-            right_var = st.selectbox("우측 Y축 (원인)", right_candidates, key="right", format_func=_fmt_var_by_col)
+            right_var = _render_grouped_indicator_picker(
+                "우측 Y축",
+                analysis_df[[c for c in analysis_df.columns if c in right_candidates or c in ("시도", "연도", "월", "연월")]],
+                "right",
+                default_group="수요",
+                default=right_candidates[0] if right_candidates else None,
+            )
         with col3:
             sido_for_ts = st.selectbox("비교 시도", selected_sido if selected_sido else all_sido, key="ts_sido")
 
         ts_df = analysis_df[analysis_df["시도"] == sido_for_ts].sort_values("연도")
         time_col = "연월" if freq == "월별" and "연월" in ts_df.columns else "연도"
 
-        if not ts_df.empty and right_var in ts_df.columns:
+        if not ts_df.empty and left_var in ts_df.columns and right_var in ts_df.columns:
             fig_dual = make_subplots(specs=[[{"secondary_y": True}]])
 
             fig_dual.add_trace(
@@ -826,13 +1327,14 @@ with sub_ts:
 
             register_fig("시계열_듀얼축", fig_dual, "시장분석")
             st.plotly_chart(fig_dual, use_container_width=True)
+            st.caption(_source_caption([left_var, right_var]))
 
             # 상관계수 표시
             valid = ts_df[[left_var, right_var]].dropna()
             if len(valid) >= 3:
                 from scipy import stats as sp_stats
                 r, p = sp_stats.pearsonr(valid[left_var], valid[right_var])
-                st.info(f"상관계수: **{r:.4f}** (p-value: {p:.4f})")
+                st.info(f"같이 움직인 정도: **{r:.4f}** (통계 신뢰도: {1 - p:.1%})")
         else:
             st.info("선택한 변수의 데이터가 부족합니다.")
 
@@ -1148,10 +1650,10 @@ with main_tab4:
         {"표시명": "지역내총생산(GRDP)",      "컬럼명": "GRDP",                  "단위": "백만원",     "연집계룰": "last",                      "정상범위": "",      "카테고리": "공급",                           "출처": "통계청",    "설명": "지역 경제규모 — 고용·소득 기반"},
         {"표시명": "아파트 인허가",           "컬럼명": "인허가_호수",            "단위": "호",         "연집계룰": "sum",                       "정상범위": "≥0",   "카테고리": "공급",                           "출처": "통계청",    "설명": "신규 인허가 호수 — 2~3년 후 공급 선행지표"},
         # 수요 > 유효수요 > 소득/신용 (국민연금)
-        {"표시명": "NPS 가입자수",            "컬럼명": "NPS_가입자수",           "단위": "명",         "연집계룰": "sum(시도집계)",              "정상범위": "≥0",   "카테고리": "수요>유효수요>소득/신용",        "출처": "국민연금",  "설명": "4대보험 직장가입자 수 — 지역 고용규모 대리변수"},
+        {"표시명": "NPS 가입자수",            "컬럼명": "NPS_가입자수",           "단위": "명",         "연집계룰": "최신 스냅샷",               "정상범위": "≥0",   "카테고리": "수요>유효수요>소득/신용",        "출처": "국민연금",  "설명": "4대보험 직장가입자 수 — 지역 고용규모 대리변수"},
         {"표시명": "NPS 1인당고지금액",       "컬럼명": "NPS_1인당고지금액",      "단위": "원",         "연집계룰": "가중평균(가입자수)",         "정상범위": "",      "카테고리": "수요>유효수요>소득/신용",        "출처": "국민연금",  "설명": "1인당 월 보험료 — 지역 소득수준 대리변수 (소득의 9%)"},
-        {"표시명": "NPS 사업장수",            "컬럼명": "NPS_사업장수",           "단위": "개",         "연집계룰": "sum(시도집계)",              "정상범위": "≥0",   "카테고리": "수요>유효수요>소득/신용",        "출처": "국민연금",  "설명": "국민연금 가입 사업장 수 — 지역 사업체 밀도"},
-        {"표시명": "NPS 고용증감",            "컬럼명": "NPS_고용증감",           "단위": "명",         "연집계룰": "sum(시도집계)",              "정상범위": "",      "카테고리": "수요>유효수요>소득/신용",        "출처": "국민연금",  "설명": "전월 대비 가입자 증감 — 양수=고용 증가"},
+        {"표시명": "NPS 사업장수",            "컬럼명": "NPS_사업장수",           "단위": "개",         "연집계룰": "최신 스냅샷",               "정상범위": "≥0",   "카테고리": "수요>유효수요>소득/신용",        "출처": "국민연금",  "설명": "국민연금 가입 사업장 수 — 지역 사업체 밀도"},
+        {"표시명": "NPS 고용증감",            "컬럼명": "NPS_고용증감",           "단위": "명",         "연집계룰": "최신 스냅샷",               "정상범위": "",      "카테고리": "수요>유효수요>소득/신용",        "출처": "국민연금",  "설명": "전월 대비 가입자 증감 — 양수=고용 증가"},
         # 수요 > 유효수요 > 소득/신용 (BOK 주담대)
         {"표시명": "주담대 잔액",             "컬럼명": "주담대_잔액",            "단위": "십억원",     "연집계룰": "12월값(연말잔액)",           "정상범위": "",      "카테고리": "수요>유효수요>소득/신용",        "출처": "BOK",      "설명": "주택담보대출 잔액 — 레버리지 총량 (높을수록 부담↑)"},
         {"표시명": "주담대 증감률",           "컬럼명": "주담대_증감률",          "단위": "%",          "연집계룰": "12월 전월비",               "정상범위": "",      "카테고리": "수요>유효수요>소득/신용",        "출처": "BOK",      "설명": "전월비 대출 증감 — 양수=대출 팽창"},
@@ -1229,6 +1731,9 @@ with main_tab4:
         """컬럼명 → '[출처] 표시명' 반환"""
         row = VAR_META[VAR_META["컬럼명"] == col]
         if row.empty:
+            meta = INDICATOR_META.get(str(col))
+            if meta:
+                return f"[{meta['source']}] {meta['label']}"
             return str(col)
         src = row.iloc[0].get("출처", "")
         lbl = row.iloc[0]["표시명"]
@@ -1601,7 +2106,7 @@ with main_tab4:
                     if len(common_5) >= 3:
                         from scipy import stats as sp_stats
                         r5, p5 = sp_stats.pearsonr(common_5[left_f_label], common_5[right_f_label])
-                        st.info(f"상관계수: **{r5:.4f}** (p-value: {p5:.4f},  n={len(common_5)})")
+                        st.info(f"같이 움직인 정도: **{r5:.4f}** (통계 신뢰도: {1 - p5:.1%}, 표본 {len(common_5)}개)")
 
             # ── 데이터 테이블 ──────────────────────────────────────
             with st.expander("계산 결과 데이터 테이블"):
@@ -1613,6 +2118,72 @@ with main_tab4:
                     computed_df_5[disp_cols_5].style.format(fmt_dict_5, na_rep="N/A"),
                     use_container_width=True,
                 )
+
+    st.divider()
+    st.header("전세-매매 선행 신호")
+    st.caption("전세와 매매 중 무엇이 먼저 움직였고, 그 뒤 다른 지표가 따라온 패턴이 반복됐는지 확인합니다.")
+
+    lead_src = filtered_monthly if not filtered_monthly.empty else filtered_yearly
+    lead_time_col = "연월" if "연월" in lead_src.columns else "연도"
+    if lead_src.empty or "평균가격" not in lead_src.columns or "전세_보증금평균" not in lead_src.columns:
+        st.info("전세-매매 선행 신호를 계산하려면 매매가격과 전세보증금 데이터가 모두 필요합니다.")
+    else:
+        ll_c1, ll_c2, ll_c3 = st.columns(3)
+        with ll_c1:
+            ll_max_lag = st.slider("최대 몇 기간까지 먼저 움직였는지", 1, 12, 6, key="lead_lag_max")
+        with ll_c2:
+            ll_regions = st.multiselect(
+                "지역",
+                sorted(lead_src["시도"].dropna().unique()),
+                default=(selected_sido[:3] if selected_sido else ["서울"] if "서울" in lead_src["시도"].unique() else []),
+                key="lead_lag_regions",
+            )
+        with ll_c3:
+            ll_use_change = st.checkbox("변화율 기준으로 보기", value=True, key="lead_lag_pct")
+
+        ll_input = lead_src[lead_src["시도"].isin(ll_regions)].copy() if ll_regions else lead_src.copy()
+        ll_df = compute_lead_lag_signal(
+            ll_input,
+            sale_col="평균가격",
+            jeonse_col="전세_보증금평균",
+            time_col=lead_time_col,
+            max_lag=ll_max_lag,
+            use_pct_change=ll_use_change,
+        )
+        if ll_df.empty:
+            st.warning("선행 신호를 계산할 표본이 부족합니다.")
+        else:
+            ll_best = ll_df.iloc[0]
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("가장 뚜렷한 지역", ll_best["지역"])
+            s2.metric("선행 방향", ll_best["선행방향"])
+            s3.metric("먼저 움직인 기간", f"{int(ll_best['먼저움직인기간'])}")
+            s4.metric("반복성", ll_best["반복성"])
+
+            display_cols = [
+                "지역", "선행방향", "먼저움직인기간", "같이움직인정도",
+                "통계신뢰도", "반복성", "표본수", "요약",
+            ]
+            st.dataframe(
+                ll_df[[c for c in display_cols if c in ll_df.columns]].style.format({
+                    "같이움직인정도": "{:.3f}",
+                    "통계신뢰도": "{:.1%}",
+                }, na_rep="N/A"),
+                use_container_width=True,
+                height=280,
+            )
+
+            fig_ll = px.bar(
+                ll_df,
+                x="지역",
+                y="같이움직인정도",
+                color="선행방향",
+                hover_data=["먼저움직인기간", "반복성", "통계신뢰도"],
+                title="지역별 전세-매매 선행 신호",
+            )
+            fig_ll.add_hline(y=0, line_dash="dash", line_color="gray")
+            register_fig("전세매매_선행신호", fig_ll, "수요공급분석")
+            st.plotly_chart(fig_ll, use_container_width=True)
 
 
 # ============================
@@ -1687,7 +2258,372 @@ with main_tab5:
 # ============================
 # Tab 6: 통계분석 (회귀 + 이상치 + 상관관계)
 # ============================
+with valuation_tab:
+    st.header("자유차트")
+    st.caption("여러 지역·지표·사용자 지표를 겹쳐 보고, 만든 조건이 과거에 효과 있었는지 바로 검증합니다.")
+
+    super_tab, strategy_tab = st.tabs(["슈퍼차트", "전략검증"])
+
+with super_tab:
+    chart_src = analysis_df.copy()
+    if chart_src.empty:
+        st.warning("자유차트에 표시할 데이터가 없습니다.")
+    else:
+        sc_time_col = "연월" if freq == "월별" and "연월" in chart_src.columns else "연도"
+        sc_numeric = _numeric_rule_columns(chart_src)
+        sc_defaults = [c for c in ["평균가격", "전세_보증금평균", "전세가율", "거래량", "PIR", "갭비용"] if c in sc_numeric]
+
+        sc_c1, sc_c2, sc_c3 = st.columns([1.4, 1.8, 1.2])
+        with sc_c1:
+            sc_regions = st.multiselect(
+                "지역",
+                sorted(chart_src["시도"].dropna().unique()),
+                default=(selected_sido[:3] if selected_sido else ["서울"] if "서울" in chart_src["시도"].unique() else []),
+                key="super_regions",
+            )
+        with sc_c2:
+            sc_indicators = _render_grouped_indicator_picker(
+                "지표",
+                chart_src,
+                "super_indicators",
+                default_group="가격",
+                default=sc_defaults[:2],
+                multi=True,
+            )
+        with sc_c3:
+            sc_mode = st.selectbox(
+                "보기 방식",
+                ["원값", "같은 기준으로 비교", "전년 대비", "전월 대비"],
+                index=1,
+                key="super_mode",
+            )
+
+        custom_expr = st.text_input(
+            "사용자 지표",
+            value="",
+            placeholder="예: 평균가격 / 전세_보증금평균 또는 갭비용 / 평균가격 * 100",
+            key="super_custom_expr",
+        )
+        custom_label = st.text_input("사용자 지표 이름", value="사용자 지표", key="super_custom_label")
+
+        sc_plot = chart_src[chart_src["시도"].isin(sc_regions)].copy() if sc_regions else chart_src.copy()
+        if custom_expr.strip():
+            computed_custom = _compute_formulas(
+                ((custom_label, custom_expr),),
+                tuple(sc_numeric),
+                tuple(sc_regions),
+                sc_time_col,
+                f"super_{freq}_{selected_years}",
+                chart_src,
+            )
+            if not computed_custom.empty and custom_label in computed_custom.columns:
+                sc_plot = sc_plot.merge(
+                    computed_custom[[sc_time_col, "시도", custom_label]],
+                    on=[sc_time_col, "시도"],
+                    how="left",
+                )
+                sc_indicators = list(dict.fromkeys(sc_indicators + [custom_label]))
+
+        if not sc_indicators:
+            st.info("표시할 지표를 1개 이상 선택하세요.")
+        else:
+            plot_rows = []
+            for region, group in sc_plot.groupby("시도"):
+                group = group.sort_values(sc_time_col).copy()
+                for ind in sc_indicators:
+                    if ind not in group.columns:
+                        continue
+                    series = group[ind].astype(float)
+                    if sc_mode == "같은 기준으로 비교":
+                        first = series.dropna().iloc[0] if not series.dropna().empty else np.nan
+                        value = series / first * 100 if pd.notna(first) and first != 0 else np.nan
+                        label = "Index=100"
+                    elif sc_mode == "전년 대비":
+                        period = 12 if sc_time_col == "연월" else 1
+                        value = series.pct_change(period) * 100
+                        label = "변화율(%)"
+                    elif sc_mode == "전월 대비":
+                        value = series.pct_change(1) * 100
+                        label = "변화율(%)"
+                    else:
+                        value = series
+                        label = "값"
+                    temp = pd.DataFrame({
+                        sc_time_col: group[sc_time_col],
+                        "지역": region,
+                        "지표": ind,
+                        "표시값": value,
+                        "축": label,
+                    })
+                    plot_rows.append(temp)
+
+            sc_long = pd.concat(plot_rows, ignore_index=True) if plot_rows else pd.DataFrame()
+            if sc_long.empty or sc_long["표시값"].dropna().empty:
+                st.info("표시 가능한 값이 없습니다.")
+            else:
+                fig_super = px.line(
+                    sc_long.dropna(subset=["표시값"]).sort_values(sc_time_col),
+                    x=sc_time_col,
+                    y="표시값",
+                    color="지표",
+                    line_dash="지역",
+                    markers=True,
+                    title="자유차트",
+                    labels={sc_time_col: "기간", "표시값": sc_long["축"].dropna().iloc[0]},
+                )
+                register_fig("자유차트_슈퍼차트", fig_super, "자유차트")
+                st.plotly_chart(fig_super, use_container_width=True)
+                st.caption(_source_caption(sc_indicators))
+
+        with st.expander("전세-매매 선행 신호 같이 보기"):
+            if "평균가격" in chart_src.columns and "전세_보증금평균" in chart_src.columns:
+                sc_ll = compute_lead_lag_signal(
+                    sc_plot,
+                    sale_col="평균가격",
+                    jeonse_col="전세_보증금평균",
+                    time_col=sc_time_col,
+                    max_lag=6,
+                )
+                if sc_ll.empty:
+                    st.info("선행 신호를 계산할 표본이 부족합니다.")
+                else:
+                    st.dataframe(
+                        sc_ll[["지역", "선행방향", "먼저움직인기간", "같이움직인정도", "통계신뢰도", "반복성", "요약"]]
+                        .style.format({"같이움직인정도": "{:.3f}", "통계신뢰도": "{:.1%}"}, na_rep="N/A"),
+                        use_container_width=True,
+                    )
+            else:
+                st.info("매매가격과 전세보증금 데이터가 필요합니다.")
+
+with strategy_tab:
+    bt_src = analysis_df.copy()
+    if bt_src.empty:
+        st.warning("전략검증에 사용할 데이터가 없습니다.")
+    else:
+        bt_time_col = "연월" if freq == "월별" and "연월" in bt_src.columns else "연도"
+        bt_lead = compute_lead_lag_signal(
+            bt_src,
+            sale_col="평균가격",
+            jeonse_col="전세_보증금평균",
+            time_col=bt_time_col,
+            max_lag=6,
+        ) if "평균가격" in bt_src.columns and "전세_보증금평균" in bt_src.columns else pd.DataFrame()
+        bt_work = prepare_screener_dataset(bt_src, lead_lag_df=bt_lead, time_col=bt_time_col)
+        # 최신 스냅샷 조건뿐 아니라 과거 전체 행 조건도 검증할 수 있도록 선행 신호는 지역별로 붙인다.
+        if not bt_lead.empty and "지역" in bt_lead.columns:
+            bt_src = bt_src.merge(
+                bt_lead[["지역", "선행방향", "먼저움직인기간", "반복성"]],
+                left_on="시도",
+                right_on="지역",
+                how="left",
+            )
+        period = 12 if bt_time_col == "연월" else 1
+        for col, new_col in [("평균가격", "가격_YoY"), ("거래량", "거래량_YoY"), ("전세가율", "전세가율_변화"), ("갭비용", "갭비용_변화")]:
+            if col in bt_src.columns:
+                bt_src[new_col] = bt_src.groupby("시도")[col].pct_change(period) * 100
+
+        st.subheader("조건 만들기")
+        bt_cols = _numeric_rule_columns(bt_src) + [c for c in ["선행방향", "반복성"] if c in bt_src.columns]
+        bt_defaults = [
+            {"column": "PIR", "op": "<", "value": "15"} if "PIR" in bt_cols else None,
+            {"column": "전세가율", "op": ">", "value": "60"} if "전세가율" in bt_cols else None,
+            {"column": "선행방향", "op": "==", "value": "전세 선행"} if "선행방향" in bt_cols else None,
+        ]
+        bt_defaults = [r for r in bt_defaults if r]
+        bt_rules, bt_combine = _render_condition_builder("bt", bt_cols, default_rules=bt_defaults)
+
+        bt_h1, bt_h2, bt_h3 = st.columns(3)
+        with bt_h1:
+            bt_price_col = _render_indicator_picker(
+                "성과 기준 가격",
+                bt_src,
+                "bt_price_col",
+                groups=["가격"],
+                default="평균가격",
+                allow_extra_numeric=False,
+            )
+        with bt_h2:
+            bt_horizons = st.multiselect("확인 기간", [3, 6, 12, 24], default=[6, 12, 24], key="bt_horizons")
+        with bt_h3:
+            bt_group = st.selectbox("검증 단위", ["시도"], key="bt_group")
+
+        if st.button("전략검증 실행", key="bt_run", type="primary"):
+            if not bt_rules:
+                st.warning("조건을 1개 이상 켜세요.")
+            else:
+                signals, summary = run_region_backtest(
+                    bt_src,
+                    bt_rules,
+                    combine=bt_combine,
+                    price_col=bt_price_col,
+                    group_col=bt_group,
+                    time_col=bt_time_col,
+                    horizons=tuple(bt_horizons or [6, 12]),
+                )
+                if summary.empty:
+                    st.info("조건을 만족한 과거 시점이 없거나 이후 수익률을 계산할 데이터가 부족합니다.")
+                else:
+                    st.subheader("지역별 검증 결과")
+                    fmt = {c: "{:.1f}%" for c in summary.columns if "수익률" in c or "성공률" in c or c == "최대하락폭"}
+                    st.dataframe(summary.style.format(fmt, na_rep="N/A"), use_container_width=True, height=320)
+                    st.subheader("진입 신호 상세")
+                    sig_fmt = {c: "{:.1f}%" for c in signals.columns if c.endswith("수익률")}
+                    st.dataframe(signals.style.format(sig_fmt, na_rep="N/A"), use_container_width=True, height=320)
+
 with main_tab6:
+    past_tab, stat_verify_tab = st.tabs(["과거분석", "통계검증"])
+
+with past_tab:
+    st.header("과거분석: 역사는 반복된다")
+    st.caption("과거에 가격이 오르고 내렸던 국면을 찾고, 수요·공급·금융 지표가 몇 년 앞서 움직였는지 가설을 만든 뒤 검증합니다.")
+
+    _past_src = yearly_df.copy()
+    if selected_sido and "시도" in _past_src.columns:
+        _past_src = _past_src[_past_src["시도"].isin(selected_sido)]
+
+    if _past_src.empty or "연도" not in _past_src.columns or "평균가격" not in _past_src.columns:
+        st.warning("과거분석에 필요한 연간 가격 데이터가 없습니다.")
+    else:
+        _past_numeric = [
+            c for c in _past_src.columns
+            if c not in ("연도", "월", "연월", "시도", "지역코드")
+            and pd.api.types.is_numeric_dtype(_past_src[c])
+            and _past_src[c].notna().any()
+        ]
+        _driver_defaults = [
+            c for c in [
+                "총인구", "30대", "NPS_가입자수", "NPS_고용증감", "가구_소득평균",
+                "인허가_호수", "착공_호수", "준공_호수", "미분양_평균",
+                "전세가율", "PIR", "PIR_NPS", "갭비용", "기준금리", "주담대_증감률",
+            ]
+            if c in _past_numeric
+        ]
+
+        _past_c1, _past_c2, _past_c3, _past_c4 = st.columns(4)
+        with _past_c1:
+            _past_sido_options = sorted(_past_src["시도"].dropna().unique()) if "시도" in _past_src.columns else []
+            _past_sido = st.selectbox(
+                "검증 지역",
+                _past_sido_options,
+                index=_past_sido_options.index("서울") if "서울" in _past_sido_options else 0,
+                key="past_sido",
+            ) if _past_sido_options else None
+        with _past_c2:
+            _past_lag = st.select_slider("선행 시차", options=[0, 1, 2, 3], value=1, key="past_lag")
+        with _past_c3:
+            _past_rise_th = st.number_input("상승 국면 기준(%)", value=5.0, step=0.5, key="past_rise_th")
+        with _past_c4:
+            _past_fall_th = st.number_input("하락 국면 기준(%)", value=-3.0, step=0.5, key="past_fall_th")
+
+        _hypothesis_vars = st.multiselect(
+            "검증할 원인 후보",
+            options=[c for c in _past_numeric if c != "평균가격"],
+            default=_driver_defaults[:8],
+            key="past_hypothesis_vars",
+            format_func=_fmt_var_by_col,
+        )
+
+        if _past_sido and _hypothesis_vars:
+            _one = _past_src[_past_src["시도"] == _past_sido].sort_values("연도").copy()
+            _one["가격변화율"] = _one["평균가격"].pct_change() * 100
+            _one["국면"] = np.select(
+                [_one["가격변화율"] >= _past_rise_th, _one["가격변화율"] <= _past_fall_th],
+                ["상승기", "하락기"],
+                default="중립기",
+            )
+
+            _rank_rows = []
+            for _var in _hypothesis_vars:
+                if _var not in _one.columns:
+                    continue
+                _test = _one[["연도", "가격변화율", _var]].copy()
+                _test[f"{_var}_선행"] = _test[_var].shift(_past_lag)
+                _test[f"{_var}_변화율_선행"] = _test[_var].pct_change().shift(_past_lag) * 100
+                for _signal_col, _kind in [(f"{_var}_선행", "레벨"), (f"{_var}_변화율_선행", "변화율")]:
+                    _valid = _test[["가격변화율", _signal_col]].replace([np.inf, -np.inf], np.nan).dropna()
+                    if len(_valid) >= 4 and _valid[_signal_col].nunique() > 1:
+                        _corr = _valid["가격변화율"].corr(_valid[_signal_col])
+                        _rank_rows.append({
+                            "원인후보": _var,
+                            "신호": _kind,
+                            "시차": _past_lag,
+                            "상관계수": _corr,
+                            "검증표본": len(_valid),
+                            "가설": f"{_past_sido}에서 {_var} {_kind}이(가) {_past_lag}년 선행하면 가격변화율이 {'같은 방향' if _corr >= 0 else '반대 방향'}으로 움직였을 가능성",
+                        })
+
+            _rank_df = pd.DataFrame(_rank_rows)
+            if _rank_df.empty:
+                st.info("선택한 변수와 시차로 검증 가능한 표본이 부족합니다.")
+            else:
+                _rank_df["설명력"] = _rank_df["상관계수"].abs()
+                _rank_df = _rank_df.sort_values("설명력", ascending=False).reset_index(drop=True)
+                _best = _rank_df.iloc[0]
+
+                st.subheader("자동 가설")
+                st.info(_best["가설"])
+
+                _sel_c1, _sel_c2 = st.columns(2)
+                with _sel_c1:
+                    _selected_driver = st.selectbox(
+                        "상세 검증 변수",
+                        _rank_df["원인후보"].drop_duplicates().tolist(),
+                        key="past_selected_driver",
+                        format_func=_fmt_var_by_col,
+                    )
+                with _sel_c2:
+                    _selected_signal = st.selectbox("신호 형태", ["변화율", "레벨"], key="past_selected_signal")
+
+                _signal_col = f"{_selected_driver}_변화율_선행" if _selected_signal == "변화율" else f"{_selected_driver}_선행"
+                _plot_df = _one[["연도", "평균가격", "가격변화율", "국면", _selected_driver]].copy()
+                _plot_df[f"{_selected_driver}_선행"] = _plot_df[_selected_driver].shift(_past_lag)
+                _plot_df[f"{_selected_driver}_변화율_선행"] = _plot_df[_selected_driver].pct_change().shift(_past_lag) * 100
+
+                _verify = _plot_df[["연도", "가격변화율", "국면", _signal_col]].replace([np.inf, -np.inf], np.nan).dropna()
+                if len(_verify) >= 4:
+                    _corr_val = _verify["가격변화율"].corr(_verify[_signal_col])
+                    _v1, _v2, _v3 = st.columns(3)
+                    _v1.metric("검증 상관계수", f"{_corr_val:.3f}")
+                    _v2.metric("표본 수", f"{len(_verify)}년")
+                    _v3.metric("방향", "같은 방향" if _corr_val >= 0 else "반대 방향")
+
+                    fig_hyp = px.scatter(
+                        _verify,
+                        x=_signal_col,
+                        y="가격변화율",
+                        color="국면",
+                        text="연도",
+                        trendline="ols" if len(_verify) >= 5 else None,
+                        title=f"{_past_sido}: {_selected_driver} {_selected_signal} {_past_lag}년 선행 vs 가격변화율",
+                        labels={_signal_col: f"{_selected_driver} {_selected_signal}({_past_lag}년 선행)", "가격변화율": "가격변화율(%)"},
+                        color_discrete_map={"상승기": "#ef4444", "하락기": "#2563eb", "중립기": "#64748b"},
+                    )
+                    fig_hyp.update_traces(textposition="top center")
+                    fig_hyp.add_hline(y=0, line_dash="dash", line_color="gray")
+                    register_fig("과거가설_검증산점도", fig_hyp, "적정값가상계산")
+                    st.plotly_chart(fig_hyp, use_container_width=True)
+
+                _episode_cols = ["연도", "국면", "평균가격", "가격변화율", _selected_driver, f"{_selected_driver}_변화율_선행"]
+                st.subheader("반복 국면 테이블")
+                st.dataframe(
+                    _plot_df[[c for c in _episode_cols if c in _plot_df.columns]]
+                    .sort_values("연도", ascending=False)
+                    .style.format({c: "{:,.2f}" for c in _episode_cols if c not in ["연도", "국면"]}, na_rep="N/A"),
+                    use_container_width=True,
+                    height=320,
+                )
+
+                with st.expander("원인 후보별 검증 순위"):
+                    st.dataframe(
+                        _rank_df[["원인후보", "신호", "시차", "상관계수", "검증표본", "가설"]]
+                        .style.format({"상관계수": "{:.3f}"}),
+                        use_container_width=True,
+                        height=320,
+                    )
+        else:
+            st.info("검증 지역과 원인 후보를 선택하세요.")
+
+with stat_verify_tab:
     sub_reg, sub_outlier, sub_corr = st.tabs(["회귀분석", "이상치 탐지", "상관관계 분석"])
 
 with sub_reg:
@@ -1807,8 +2743,9 @@ with sub_corr:
             register_fig("상관관계_히트맵", fig_heatmap, "통계분석")
             st.plotly_chart(fig_heatmap, use_container_width=True)
 
-            with st.expander("p-value 상세"):
-                st.dataframe(pval.style.format("{:.4f}"))
+            with st.expander("통계 신뢰도 상세"):
+                confidence = 1 - pval
+                st.dataframe(confidence.style.format("{:.1%}"))
         else:
             st.info("상관계수를 계산할 데이터가 부족합니다.")
 
@@ -1867,8 +2804,8 @@ with sub_corr:
 # Tab 7: 고급분석 (클러스터링 + Granger)
 # ============================
 with main_tab7:
-    st.caption("**클러스터링**: 비슷한 특성의 지역을 자동으로 묶어 그룹별 특징을 파악합니다 | **Granger 인과성**: 특정 지표가 가격 변화를 몇 달 앞서 예측할 수 있는지 통계적으로 검정합니다")
-    sub_cluster, sub_granger = st.tabs(["클러스터링", "Granger 인과성"])
+    st.caption("**클러스터링**: 비슷한 특성의 지역을 자동으로 묶어 그룹별 특징을 파악합니다 | **선행 신호**: 특정 지표가 가격 변화를 몇 달 먼저 움직였는지 확인합니다")
+    sub_cluster, sub_granger = st.tabs(["클러스터링", "선행 신호"])
 
 with sub_cluster:
     st.header("지역 클러스터링")
@@ -1942,8 +2879,8 @@ with sub_cluster:
 # Tab 6-2: Granger 인과성 (고급분석 서브탭)
 # ============================
 with sub_granger:
-    st.header("Granger 인과성 검정")
-    st.caption("X 변수가 Y 변수를 시간적으로 선행하여 예측하는 데 도움이 되는지 검정합니다.")
+    st.header("선행 신호 반복성")
+    st.caption("한 지표가 먼저 움직인 뒤 다른 지표가 따라온 패턴이 반복됐는지 확인합니다.")
 
     # Granger는 월별 시계열 데이터 필요
     granger_src = filtered_monthly if not filtered_monthly.empty else monthly_df
@@ -1955,12 +2892,12 @@ with sub_granger:
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            g_y = st.selectbox("결과변수 (Y)", [v for v in result_vars if v in valid_num_g], key="g_y", format_func=_fmt_var_by_col)
+            g_y = st.selectbox("나중에 움직였는지 볼 지표", [v for v in result_vars if v in valid_num_g], key="g_y", format_func=_fmt_var_by_col)
         with col2:
             g_x_candidates = [v for v in valid_num_g if v != g_y]
-            g_x = st.selectbox("원인변수 (X)", g_x_candidates, key="g_x", format_func=_fmt_var_by_col)
+            g_x = st.selectbox("먼저 움직였는지 볼 지표", g_x_candidates, key="g_x", format_func=_fmt_var_by_col)
         with col3:
-            g_max_lag = st.slider("최대 시차 (개월)", 1, 12, 4, key="g_lag")
+            g_max_lag = st.slider("최대 몇 개월 먼저 움직였는지", 1, 12, 4, key="g_lag")
 
         if g_y and g_x:
             try:
@@ -1969,26 +2906,33 @@ with sub_granger:
                 if granger_df.empty:
                     st.warning("검정할 수 있는 데이터가 부족합니다.")
                 else:
-                    # 요약: 인과성 있는 시도 수
+                    # 요약: 선행 패턴이 반복된 시도 수
                     causal_sido = granger_df[granger_df["인과성"]]["시도"].nunique()
                     total_sido = granger_df["시도"].nunique()
-                    st.metric("인과성 발견 시도", f"{causal_sido} / {total_sido}")
+                    st.metric("선행 패턴 발견 지역", f"{causal_sido} / {total_sido}")
 
-                    # 히트맵: 시도 × lag별 p값
+                    # 히트맵: 시도 × 기간별 통계 신뢰도
                     pivot_g = granger_df.pivot_table(index="시도", columns="lag", values="p값", aggfunc="first")
+                    pivot_conf = 1 - pivot_g
                     fig_g = px.imshow(
-                        pivot_g, text_auto=".3f",
-                        color_continuous_scale="RdYlGn_r", zmin=0, zmax=0.1,
-                        title=f"Granger 인과성 p값 ({g_x} → {g_y})",
-                        labels={"color": "p값"},
+                        pivot_conf, text_auto=".1%",
+                        color_continuous_scale="RdYlGn", zmin=0.9, zmax=1.0,
+                        title=f"선행 신호 반복성 ({g_x} 먼저 → {g_y} 나중)",
+                        labels={"color": "통계 신뢰도", "lag": "먼저 움직인 개월"},
                     )
-                    register_fig("Granger_히트맵", fig_g, "고급분석")
+                    register_fig("선행신호_반복성_히트맵", fig_g, "자유차트")
                     st.plotly_chart(fig_g, use_container_width=True)
 
                     # 상세 테이블
                     with st.expander("상세 결과"):
-                        st.dataframe(granger_df.style.format({
-                            "F통계량": "{:.4f}", "p값": "{:.4f}"
+                        detail_g = granger_df.rename(columns={
+                            "lag": "먼저움직인개월",
+                            "p값": "낮을수록_우연가능성",
+                            "인과성": "반복패턴있음",
+                        })
+                        detail_g["통계신뢰도"] = 1 - detail_g["낮을수록_우연가능성"]
+                        st.dataframe(detail_g.style.format({
+                            "F통계량": "{:.4f}", "낮을수록_우연가능성": "{:.4f}", "통계신뢰도": "{:.1%}"
                         }), use_container_width=True)
 
             except (ValueError, ImportError) as e:
@@ -2485,6 +3429,135 @@ with main_tab9:
 # ============================
 # Tab 10: 소득-매물 매칭
 # ============================
+with listing_tab:
+    st.header("매물찾기")
+    st.caption("구매력, 급지, 실거래, 네이버 호가를 함께 보며 반복 국면에서 살 만한 지역을 찾습니다.")
+
+    st.subheader("지역검색기")
+    st.caption("전국 지역을 조건식으로 훑어 투자 후보를 먼저 좁힙니다. 예: PIR < 15 AND 전세가율 > 60")
+
+    screen_src = analysis_df.copy()
+    screen_time_col = "연월" if freq == "월별" and "연월" in screen_src.columns else "연도"
+    if screen_src.empty:
+        st.info("지역검색기에 사용할 데이터가 없습니다.")
+    else:
+        screen_lead = compute_lead_lag_signal(
+            screen_src,
+            sale_col="평균가격",
+            jeonse_col="전세_보증금평균",
+            time_col=screen_time_col,
+            max_lag=6,
+        ) if "평균가격" in screen_src.columns and "전세_보증금평균" in screen_src.columns else pd.DataFrame()
+        screen_df = prepare_screener_dataset(screen_src, lead_lag_df=screen_lead, time_col=screen_time_col)
+        if screen_df.empty:
+            st.info("지역검색기용 최신 데이터가 없습니다.")
+        else:
+            screen_cols = _numeric_rule_columns(screen_df) + [c for c in ["선행방향", "반복성"] if c in screen_df.columns]
+            screen_defaults = [
+                {"column": "PIR", "op": "<", "value": "15"} if "PIR" in screen_cols else None,
+                {"column": "전세가율", "op": ">", "value": "60"} if "전세가율" in screen_cols else None,
+                {"column": "선행방향", "op": "==", "value": "전세 선행"} if "선행방향" in screen_cols else None,
+            ]
+            screen_defaults = [r for r in screen_defaults if r]
+            with st.expander("검색 조건", expanded=True):
+                screen_rules, screen_combine = _render_condition_builder(
+                    "screen",
+                    screen_cols,
+                    default_rules=screen_defaults,
+                    max_rules=6,
+                )
+
+            if screen_rules:
+                screen_mask = evaluate_condition_rules(screen_df, screen_rules, combine=screen_combine)
+                screen_result = screen_df[screen_mask].copy()
+            else:
+                screen_result = screen_df.copy()
+
+            screen_result["충족조건수"] = 0
+            for rule in screen_rules:
+                screen_result["충족조건수"] += evaluate_condition_rules(screen_result, [rule], combine="AND").astype(int)
+            if "선행방향" in screen_result.columns:
+                screen_result["선행신호요약"] = screen_result.apply(_format_signal_summary, axis=1)
+
+            sr1, sr2, sr3 = st.columns(3)
+            sr1.metric("검색 대상", f"{len(screen_df):,}개 지역")
+            sr2.metric("조건 충족", f"{len(screen_result):,}개 지역")
+            sr3.metric("조건 조합", screen_combine)
+
+            show_cols = [
+                "시도", screen_time_col, "평균가격", "가격_YoY", "거래량", "거래량_YoY",
+                "전세가율", "PIR", "갭비용", "미분양소화기간", "선행신호요약", "충족조건수",
+            ]
+            show_cols = [c for c in show_cols if c in screen_result.columns]
+            if screen_result.empty:
+                st.info("현재 조건을 만족하는 지역이 없습니다. OR 조건을 쓰거나 기준을 완화해 보세요.")
+            else:
+                sort_col = "충족조건수" if "충족조건수" in screen_result.columns else show_cols[0]
+                screen_result = screen_result.sort_values(sort_col, ascending=False)
+                fmt = {
+                    c: "{:,.1f}" for c in show_cols
+                    if c not in ["시도", screen_time_col, "선행신호요약", "충족조건수"]
+                }
+                st.dataframe(
+                    screen_result[show_cols].style.format(fmt, na_rep="N/A"),
+                    use_container_width=True,
+                    height=340,
+                )
+                screen_csv = screen_result[show_cols].to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    "지역검색 결과 CSV 다운로드",
+                    data=screen_csv,
+                    file_name="region_screener_result.csv",
+                    mime="text/csv",
+                    key="screen_download",
+                )
+
+    st.divider()
+
+    _listing_df = st.session_state.get("naver_listings_df", pd.DataFrame())
+    if not _listing_df.empty:
+        _lf1, _lf2, _lf3 = st.columns(3)
+        with _lf1:
+            _listing_sigungu = st.multiselect(
+                "매물 시군구",
+                sorted(_listing_df["시군구"].dropna().unique().tolist()),
+                default=[],
+                key="listing_sigungu_filter",
+            )
+        with _lf2:
+            _listing_trade = st.multiselect(
+                "거래유형",
+                sorted(_listing_df["거래유형"].dropna().unique().tolist()),
+                default=[],
+                key="listing_trade_filter",
+            )
+        with _lf3:
+            _max_listing_price = int(_listing_df["매물가격"].max()) if _listing_df["매물가격"].notna().any() else 0
+            _listing_price_limit = st.number_input(
+                "최대 호가(만원)",
+                min_value=0,
+                value=_max_listing_price,
+                step=1000,
+                key="listing_price_limit",
+            )
+
+        _filtered_listing = _listing_df.copy()
+        if _listing_sigungu:
+            _filtered_listing = _filtered_listing[_filtered_listing["시군구"].isin(_listing_sigungu)]
+        if _listing_trade:
+            _filtered_listing = _filtered_listing[_filtered_listing["거래유형"].isin(_listing_trade)]
+        if _listing_price_limit > 0:
+            _filtered_listing = _filtered_listing[_filtered_listing["매물가격"] <= _listing_price_limit]
+
+        st.subheader("네이버 매물 후보")
+        st.dataframe(
+            _filtered_listing.sort_values("매물가격").style.format({"매물가격": "{:,.0f}"}, na_rep="N/A"),
+            use_container_width=True,
+            height=320,
+        )
+    else:
+        st.info("네이버 매물 CSV/JSON을 거래현황 탭에서 업로드하면 매물 후보 필터가 활성화됩니다.")
+
 with main_tab10:
     st.header("소득-매물 매칭 분석")
     st.caption("소득분위별 구매력을 계산하고, 시군구 급지순위와 매칭합니다.")

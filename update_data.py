@@ -1,10 +1,11 @@
 """
 부동산 실거래 데이터 업데이트 스크립트
-- 기간: 2024.02 ~ 2026.02
+- 기간: 기존 CSV 다음 월 ~ 실행일 기준 전월 (인자 지정 가능)
 - 대상: 아파트 매매 (getRTMSDataSvcAptTradeDev) + 임대차 (getRTMSDataSvcAptRent)
-- 중단/재개 지원: update_progress.json에 진행상황 저장
+- 중단/재개 지원: 기존 CSV + update_progress.json 기준으로 중복 방지
 """
 
+import argparse
 import requests
 import xml.etree.ElementTree as ET
 import csv
@@ -13,6 +14,7 @@ import sys
 import json
 import time
 import glob as _glob
+from datetime import date
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -26,7 +28,7 @@ API_KEY = os.environ.get("MOLIT_API_KEY", "")
 
 # 날짜 범위
 START_YM = 202402
-END_YM = 202602
+END_YM = None
 
 # API 호출 간 sleep (초)
 SLEEP_SEC = 0.3
@@ -115,6 +117,9 @@ def load_region_codes():
 
 def generate_date_range(start_ym, end_ym):
     """YYYYMM 범위 생성"""
+    if start_ym > end_ym:
+        print(f"[INFO] 날짜 범위 없음: {start_ym} > {end_ym}")
+        return []
     dates = []
     y, m = start_ym // 100, start_ym % 100
     ey, em = end_ym // 100, end_ym % 100
@@ -140,6 +145,92 @@ def save_progress(progress):
     """진행상황 저장"""
     with open(PROGRESS_FILE, "w") as f:
         json.dump(progress, f, ensure_ascii=False)
+
+
+def validate_ym(value):
+    """YYYYMM 정수 유효성 검증"""
+    try:
+        ym = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(f"YYYYMM 형식이 아닙니다: {value}")
+    year, month = divmod(ym, 100)
+    if year < 2000 or month < 1 or month > 12:
+        raise argparse.ArgumentTypeError(f"YYYYMM 형식이 아닙니다: {value}")
+    return ym
+
+
+def previous_month_ym(today=None):
+    """실행일 기준 전월을 YYYYMM 정수로 반환"""
+    if today is None:
+        today = date.today()
+    year, month = today.year, today.month - 1
+    if month == 0:
+        year -= 1
+        month = 12
+    return year * 100 + month
+
+
+def next_month_ym(ym):
+    """YYYYMM 정수의 다음 월"""
+    year, month = divmod(int(ym), 100)
+    month += 1
+    if month > 12:
+        year += 1
+        month = 1
+    return year * 100 + month
+
+
+def _read_existing_pairs(csv_path, target_months=None, collect_pairs=True):
+    """
+    기존 CSV에서 (지역코드, YYYYMM) 조합과 최대 YYYYMM을 스트리밍으로 읽는다.
+    target_months가 있으면 해당 월 조합만 set에 담아 메모리를 줄인다.
+    """
+    pairs = set()
+    max_ym = None
+    target_months = set(target_months or [])
+
+    if not os.path.exists(csv_path):
+        return pairs, max_ym
+
+    for enc in ("cp949", "utf-8-sig", "utf-8"):
+        try:
+            with open(csv_path, newline="", encoding=enc) as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    code = str(row.get("지역코드", "")).strip()
+                    year = str(row.get("년", "")).strip()
+                    month = str(row.get("월", "")).strip()
+                    if not code or not year or not month:
+                        continue
+                    try:
+                        ym = int(year) * 100 + int(month)
+                    except ValueError:
+                        continue
+                    if max_ym is None or ym > max_ym:
+                        max_ym = ym
+                    ym_str = f"{ym:06d}"
+                    if collect_pairs and (not target_months or ym_str in target_months):
+                        pairs.add((code.zfill(5), ym_str))
+            return pairs, max_ym
+        except UnicodeDecodeError:
+            continue
+
+    raise ValueError(f"CSV 인코딩을 확인할 수 없습니다: {csv_path}")
+
+
+def _get_max_ym(csv_path):
+    """기존 CSV의 최대 YYYYMM만 반환"""
+    _, max_ym = _read_existing_pairs(csv_path, collect_pairs=False)
+    return max_ym
+
+
+def resolve_default_start_ym():
+    """매매/임대차 원본 중 더 오래된 최신월의 다음 월을 기본 시작월로 사용"""
+    max_values = [_get_max_ym(p) for p in (APT_CSV, RENT_CSV)]
+    max_values = [v for v in max_values if v is not None]
+    if not max_values:
+        return START_YM
+    return next_month_ym(min(max_values))
 
 
 # ============================================================
@@ -229,17 +320,58 @@ def parse_xml(response):
 
 def map_trade_row(api_row):
     """API 응답 dict → 매매 CSV 행 (컬럼 순서 맞춤)"""
-    row = {}
-    for col in TRADE_COLUMNS:
-        row[col] = api_row.get(col, "")
-    return row
+    return {
+        "년": api_row.get("년") or api_row.get("dealYear", ""),
+        "월": api_row.get("월") or api_row.get("dealMonth", ""),
+        "일": api_row.get("일") or api_row.get("dealDay", ""),
+        "지역코드": api_row.get("지역코드") or api_row.get("sggCd", ""),
+        "법정동": api_row.get("법정동") or api_row.get("umdNm", ""),
+        "지번": api_row.get("지번") or api_row.get("jibun", ""),
+        "아파트": api_row.get("아파트") or api_row.get("aptNm", ""),
+        "단지": api_row.get("단지") or api_row.get("aptNm", ""),
+        "연립다세대": api_row.get("연립다세대", ""),
+        "연면적": api_row.get("연면적", ""),
+        "전용면적": api_row.get("전용면적") or api_row.get("excluUseAr", ""),
+        "대지면적": api_row.get("대지면적", ""),
+        "대지권면적": api_row.get("대지권면적", ""),
+        "층": api_row.get("층") or api_row.get("floor", ""),
+        "건축년도": api_row.get("건축년도") or api_row.get("buildYear", ""),
+        "거래금액": api_row.get("거래금액") or api_row.get("dealAmount", ""),
+        "주택유형": api_row.get("주택유형", "아파트"),
+        "구분": api_row.get("구분", ""),
+        "해제여부": api_row.get("해제여부") or api_row.get("cdealType", ""),
+        "해제사유발생일": api_row.get("해제사유발생일") or api_row.get("cdealDay", ""),
+        "거래유형": api_row.get("거래유형") or api_row.get("dealingGbn", ""),
+        "등기일자": api_row.get("등기일자") or api_row.get("rgstDate", ""),
+    }
 
 
 def map_rent_row(api_row):
     """API 응답 dict → 임대차 CSV 행 (컬럼 순서 맞춤 + 컬럼명 변경 대응)"""
-    row = {}
-    for col in RENT_COLUMNS:
-        row[col] = api_row.get(col, "")
+    row = {
+        "년": api_row.get("년") or api_row.get("dealYear", ""),
+        "월": api_row.get("월") or api_row.get("dealMonth", ""),
+        "일": api_row.get("일") or api_row.get("dealDay", ""),
+        "지역코드": api_row.get("지역코드") or api_row.get("sggCd", ""),
+        "법정동": api_row.get("법정동") or api_row.get("umdNm", ""),
+        "지번": api_row.get("지번") or api_row.get("jibun", ""),
+        "아파트": api_row.get("아파트") or api_row.get("aptNm", ""),
+        "연립다세대": api_row.get("연립다세대", ""),
+        "단지": api_row.get("단지") or api_row.get("aptNm", ""),
+        "계약면적": api_row.get("계약면적", ""),
+        "전용면적": api_row.get("전용면적") or api_row.get("excluUseAr", ""),
+        "층": api_row.get("층") or api_row.get("floor", ""),
+        "건축년도": api_row.get("건축년도") or api_row.get("buildYear", ""),
+        "보증금액": api_row.get("보증금액") or api_row.get("deposit", ""),
+        "월세금액": api_row.get("월세금액") or api_row.get("monthlyRent", ""),
+        "보증금": api_row.get("보증금") or api_row.get("deposit", ""),
+        "월세": api_row.get("월세") or api_row.get("monthlyRent", ""),
+        "종전계약보증금": api_row.get("종전계약보증금") or api_row.get("preDeposit", ""),
+        "종전계약월세": api_row.get("종전계약월세") or api_row.get("preMonthlyRent", ""),
+        "갱신요구권사용": api_row.get("갱신요구권사용") or api_row.get("useRRRight", ""),
+        "계약기간": api_row.get("계약기간") or api_row.get("contractTerm", ""),
+        "계약구분": api_row.get("계약구분") or api_row.get("contractType", ""),
+    }
 
     # API가 '보증금'으로 반환하는 경우 → '보증금액'에도 복사
     if not row["보증금액"] and api_row.get("보증금", ""):
@@ -261,7 +393,7 @@ def map_rent_row(api_row):
 # 다운로드 루프
 # ============================================================
 
-def download_data(data_type, region_codes, date_range, progress):
+def download_data(data_type, region_codes, date_range, progress, dry_run=False, sleep_sec=SLEEP_SEC):
     """
     data_type: 'trade' 또는 'rent'
     region_codes: 5자리 코드 리스트
@@ -281,20 +413,29 @@ def download_data(data_type, region_codes, date_range, progress):
         map_fn = map_rent_row
         done_key = "rent_done"
 
-    done_set = set(tuple(x) for x in progress[done_key])
+    existing_pairs, existing_max_ym = _read_existing_pairs(csv_path, target_months=date_range)
+    progress_set = set(tuple(x) for x in progress.get(done_key, []))
+    done_set = progress_set | existing_pairs
     total_pairs = len(region_codes) * len(date_range)
     skip_count = sum(1 for rc in region_codes for d in date_range if (rc, d) in done_set)
     remaining = total_pairs - skip_count
 
     print(f"\n{'='*60}")
     print(f"[{data_type.upper()}] 다운로드 시작")
-    print(f"  총 {total_pairs} 호출 중 {skip_count} 완료, {remaining} 남음")
+    print(f"  기존 CSV 최신월: {existing_max_ym or 'N/A'}")
+    print(f"  총 {total_pairs} 호출 중 {skip_count} 완료/보유, {remaining} 남음")
+    print(f"    - CSV 보유 조합: {len(existing_pairs)}")
+    print(f"    - 진행상황 조합: {len(progress_set)}")
     print(f"  대상 CSV: {csv_path}")
     print(f"{'='*60}")
 
+    if dry_run:
+        print(f"[{data_type.upper()}] dry-run: API 호출/CSV 쓰기 없이 계획만 확인했습니다.")
+        return {"total": total_pairs, "skip": skip_count, "remaining": remaining, "new_rows": 0}
+
     if remaining == 0:
         print(f"[{data_type.upper()}] 이미 모두 완료됨. 건너뜀.")
-        return
+        return {"total": total_pairs, "skip": skip_count, "remaining": remaining, "new_rows": 0}
 
     # CSV 파일 열기 (append 모드)
     csv_file = open(csv_path, "a", newline="\n", encoding="cp949")
@@ -329,7 +470,7 @@ def download_data(data_type, region_codes, date_range, progress):
                             save_progress(progress)
                             csv_file.flush()
                             print(f"[INFO] 다음 실행 시 이어서 진행됩니다.")
-                            return
+                            return {"total": total_pairs, "skip": skip_count, "remaining": remaining, "new_rows": new_rows_total}
                         time.sleep(2)
                         continue
 
@@ -343,14 +484,16 @@ def download_data(data_type, region_codes, date_range, progress):
 
                     # 완료 기록
                     done_set.add((code, ym))
-                    progress[done_key].append([code, ym])
+                    if (code, ym) not in progress_set:
+                        progress[done_key].append([code, ym])
+                        progress_set.add((code, ym))
 
                     # 주기적 저장
                     if call_count % SAVE_EVERY == 0:
                         save_progress(progress)
                         csv_file.flush()
 
-                    time.sleep(SLEEP_SEC)
+                    time.sleep(sleep_sec)
 
                 except requests.exceptions.RequestException as e:
                     print(f"\n  [NET ERROR] code={code} date={ym}: {e}")
@@ -359,7 +502,7 @@ def download_data(data_type, region_codes, date_range, progress):
                         print(f"\n[WARN] 네트워크 에러 {errors}회. 진행상황 저장 후 중단.")
                         save_progress(progress)
                         csv_file.flush()
-                        return
+                        return {"total": total_pairs, "skip": skip_count, "remaining": remaining, "new_rows": new_rows_total}
                     time.sleep(3)
                     continue
 
@@ -368,6 +511,7 @@ def download_data(data_type, region_codes, date_range, progress):
         save_progress(progress)
 
     print(f"\n[{data_type.upper()}] 완료: {new_rows_total}건 추가")
+    return {"total": total_pairs, "skip": skip_count, "remaining": remaining, "new_rows": new_rows_total}
 
 
 # ============================================================
@@ -395,49 +539,116 @@ def delete_cache():
 # 메인
 # ============================================================
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="아파트 매매/임대차 실거래 데이터 증분 업데이트")
+    parser.add_argument("--start-ym", type=validate_ym, default=None, help="시작월 YYYYMM (기본: 기존 CSV 다음 월)")
+    parser.add_argument("--end-ym", type=validate_ym, default=None, help="종료월 YYYYMM (기본: 실행일 기준 전월)")
+    parser.add_argument("--dry-run", action="store_true", help="API 호출과 파일 쓰기 없이 호출 계획만 출력")
+    parser.add_argument("--sleep-sec", type=float, default=SLEEP_SEC, help=f"API 호출 간 대기 초 (기본: {SLEEP_SEC})")
+    parser.add_argument(
+        "--only",
+        choices=["all", "trade", "rent"],
+        default="all",
+        help="업데이트 대상 선택 (기본: all)",
+    )
+    parser.add_argument("--keep-cache", action="store_true", help="다운로드 후 parquet 캐시를 삭제하지 않음")
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    start_ym = args.start_ym or resolve_default_start_ym()
+    end_ym = args.end_ym or previous_month_ym()
+
+    if start_ym > end_ym:
+        print("=" * 60)
+        print(" 부동산 실거래 데이터 업데이트")
+        print(f" 기간: {start_ym} ~ {end_ym}")
+        print(" 업데이트할 월이 없습니다.")
+        print("=" * 60)
+        return
+
+    if not API_KEY and not args.dry_run:
+        raise RuntimeError("MOLIT_API_KEY가 설정되어 있지 않습니다. .env 파일을 확인하세요.")
+
     print("=" * 60)
     print(" 부동산 실거래 데이터 업데이트")
-    print(f" 기간: {START_YM} ~ {END_YM}")
+    print(f" 기간: {start_ym} ~ {end_ym}")
+    print(f" 대상: {args.only}")
+    print(f" dry-run: {args.dry_run}")
     print("=" * 60)
 
     # 1. 지역코드 로드
     region_codes = load_region_codes()
 
     # 2. 날짜 범위 생성
-    date_range = generate_date_range(START_YM, END_YM)
+    date_range = generate_date_range(start_ym, end_ym)
 
     # 3. 진행상황 로드
     progress = load_progress()
+    progress.setdefault("trade_done", [])
+    progress.setdefault("rent_done", [])
+
+    results = {}
 
     # 4. 매매 데이터 다운로드
-    download_data("trade", region_codes, date_range, progress)
+    if args.only in ("all", "trade"):
+        results["trade"] = download_data(
+            "trade", region_codes, date_range, progress,
+            dry_run=args.dry_run, sleep_sec=args.sleep_sec,
+        )
 
     # 5. 임대차 데이터 다운로드
-    download_data("rent", region_codes, date_range, progress)
+    if args.only in ("all", "rent"):
+        results["rent"] = download_data(
+            "rent", region_codes, date_range, progress,
+            dry_run=args.dry_run, sleep_sec=args.sleep_sec,
+        )
 
     # 6. parquet 캐시 삭제
-    print(f"\n[CACHE] 캐시 파일 삭제 중...")
-    delete_cache()
+    if not args.dry_run and not args.keep_cache:
+        print(f"\n[CACHE] 캐시 파일 삭제 중...")
+        delete_cache()
+    elif args.dry_run:
+        print(f"\n[CACHE] dry-run: 캐시를 삭제하지 않습니다.")
+    else:
+        print(f"\n[CACHE] --keep-cache 지정: 캐시를 삭제하지 않습니다.")
 
     # 7. 진행상황 파일 정리 (완전 완료 시)
     total_trade = len(region_codes) * len(date_range)
     total_rent = total_trade
-    done_trade = len(set(tuple(x) for x in progress.get("trade_done", [])))
-    done_rent = len(set(tuple(x) for x in progress.get("rent_done", [])))
+    done_trade = results.get("trade", {}).get("skip", 0)
+    done_rent = results.get("rent", {}).get("skip", 0)
+    if not args.dry_run:
+        if "trade" in results:
+            done_trade = len(set(tuple(x) for x in progress.get("trade_done", [])) | _read_existing_pairs(APT_CSV, date_range)[0])
+        if "rent" in results:
+            done_rent = len(set(tuple(x) for x in progress.get("rent_done", [])) | _read_existing_pairs(RENT_CSV, date_range)[0])
 
     print(f"\n{'='*60}")
     print(f" 결과 요약")
-    print(f"  매매: {done_trade}/{total_trade} 완료")
-    print(f"  임대차: {done_rent}/{total_rent} 완료")
+    if args.only in ("all", "trade"):
+        print(f"  매매: {done_trade}/{total_trade} 완료/보유")
+        print(f"    추가 행: {results.get('trade', {}).get('new_rows', 0):,}건")
+    if args.only in ("all", "rent"):
+        print(f"  임대차: {done_rent}/{total_rent} 완료/보유")
+        print(f"    추가 행: {results.get('rent', {}).get('new_rows', 0):,}건")
 
-    if done_trade >= total_trade and done_rent >= total_rent:
+    all_done = True
+    if args.only in ("all", "trade"):
+        all_done = all_done and done_trade >= total_trade
+    if args.only in ("all", "rent"):
+        all_done = all_done and done_rent >= total_rent
+
+    if (not args.dry_run) and all_done:
         print(f"\n  모든 데이터 업데이트 완료!")
         print(f"  진행상황 파일 삭제: {PROGRESS_FILE}")
         if os.path.exists(PROGRESS_FILE):
             os.remove(PROGRESS_FILE)
-    else:
+    elif not args.dry_run:
         print(f"\n  미완료 항목이 있습니다. 스크립트를 다시 실행하면 이어서 진행됩니다.")
+    else:
+        print(f"\n  dry-run 완료: 실제 업데이트는 수행하지 않았습니다.")
 
     print(f"{'='*60}")
 

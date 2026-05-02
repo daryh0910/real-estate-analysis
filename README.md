@@ -39,19 +39,26 @@ python update_data.py
 streamlit run app.py
 ```
 
+## 배포
+
+이 앱은 `cache/`, `data/`, `geo_data/`에 포함된 파일만으로 읽기 전용 Streamlit 대시보드 배포가 가능합니다. 일반 배포에는 API 키가 필요하지 않습니다.
+
+```bash
+python -m py_compile app.py
+streamlit run app.py --server.headless true --server.port 8503
+```
+
+Streamlit Community Cloud에서는 main file을 `app.py`로 지정하고, `runtime.txt`, `requirements.txt`, `packages.txt`를 함께 배포하세요. 자세한 절차는 `DEPLOYMENT.md`를 참고하세요.
+
 ## 주요 기능
 
 | 탭 | 기능 | 활용 |
 |----|------|------|
-| Overview | KPI 카드 + 가격/거래량 추이 | 시장 전체 조망 |
-| 상관관계 | 히트맵 + 산점도 | 변수 간 관계 파악 |
-| 시계열 | 듀얼 Y축 비교 | 선행/후행 지표 확인 |
-| 지역별 | 시군구 순위 | 투자 유망 지역 탐색 |
-| 수식 계산기 | 사용자 정의 수식 | 커스텀 지표 생성 |
-| 회귀분석 | 다중회귀 OLS | 가격 결정 요인 분석 |
-| 이상치 탐지 | Z-score/IQR | 급등/급락 지역 감지 |
-| 클러스터링 | K-Means | 유사 지역 군집화 |
-| Granger 인과성 | lag별 F-test | 선행지표 식별 |
+| Overview | 시장 온도계 + 역사 흐름 + 핵심 트렌드 | 반복 국면 조망 |
+| 수요공급분석 | 수요, 공급, 2차가공 지표 | 구조적 변화 확인 |
+| 거래현황 | 실거래 + 네이버 매물 업로드 | 현재 거래/호가 비교 |
+| 매물찾기 | 구매력, 급지, 매물 필터 | 후보 지역 탐색 |
+| 적정값가상계산 | 과거분석, 통계검증, 예측, 투자 계산 | 가설 검증과 시나리오 계산 |
 
 ## 데이터 소스
 

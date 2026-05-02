@@ -108,6 +108,262 @@ def correlation_by_period(df, var_x="GRDP", var_y="평균가격", period_col="�
     return pd.DataFrame(results)
 
 
+# ── 전략 연구 / 지역검색기 공통 엔진 ────────────────────────────────────────
+
+def _infer_time_col(df):
+    if "연월" in df.columns:
+        return "연월"
+    if "연도" in df.columns:
+        return "연도"
+    return None
+
+
+def _pct_change_by_group(df, group_col, value_col, periods=1):
+    if value_col not in df.columns:
+        return pd.Series(np.nan, index=df.index)
+    return df.groupby(group_col)[value_col].pct_change(periods=periods, fill_method=None) * 100
+
+
+def compute_lead_lag_signal(
+    df,
+    sale_col="평균가격",
+    jeonse_col="전세_보증금평균",
+    group_col="시도",
+    time_col=None,
+    max_lag=12,
+    use_pct_change=True,
+):
+    """
+    전세와 매매 중 무엇이 먼저 움직이는지 계산한다.
+
+    화면에서는 "선행 신호"로 표시하고, 내부적으로는 시차 상관과 Granger 검정을 함께 사용한다.
+    lag > 0: 전세가 lag기간 먼저 움직인 뒤 매매가 따라온 패턴
+    lag < 0: 매매가 abs(lag)기간 먼저 움직인 뒤 전세가 따라온 패턴
+    """
+    time_col = time_col or _infer_time_col(df)
+    required = [group_col, sale_col, jeonse_col]
+    if time_col:
+        required.append(time_col)
+    if any(c not in df.columns for c in required):
+        return pd.DataFrame()
+
+    rows = []
+    max_lag = int(max(1, max_lag))
+
+    for name, group in df[required].dropna(subset=[sale_col, jeonse_col]).groupby(group_col):
+        group = group.sort_values(time_col).copy() if time_col else group.copy()
+        if use_pct_change:
+            sale = group[sale_col].astype(float).pct_change() * 100
+            jeonse = group[jeonse_col].astype(float).pct_change() * 100
+        else:
+            sale = group[sale_col].astype(float)
+            jeonse = group[jeonse_col].astype(float)
+
+        lag_rows = []
+        for lag in range(-max_lag, max_lag + 1):
+            shifted_jeonse = jeonse.shift(lag)
+            valid = pd.concat([sale, shifted_jeonse], axis=1).replace([np.inf, -np.inf], np.nan).dropna()
+            if len(valid) < 6 or valid.iloc[:, 0].nunique() <= 1 or valid.iloc[:, 1].nunique() <= 1:
+                continue
+            corr, p_value = stats.pearsonr(valid.iloc[:, 0], valid.iloc[:, 1])
+            lag_rows.append({
+                "지역": name,
+                "시차": lag,
+                "같이움직인정도": round(float(corr), 4),
+                "통계신뢰도": round(float(1 - p_value), 4),
+                "p값": round(float(p_value), 4),
+                "표본수": int(len(valid)),
+            })
+
+        if not lag_rows:
+            continue
+
+        lag_df = pd.DataFrame(lag_rows)
+        best = lag_df.iloc[lag_df["같이움직인정도"].abs().argmax()].copy()
+        best_lag = int(best["시차"])
+        if best_lag > 0:
+            direction = "전세 선행"
+            summary = f"전세가 {best_lag}기간 먼저 움직인 뒤 매매가 따라온 패턴"
+        elif best_lag < 0:
+            direction = "매매 선행"
+            summary = f"매매가 {abs(best_lag)}기간 먼저 움직인 뒤 전세가 따라온 패턴"
+        else:
+            direction = "동행"
+            summary = "전세와 매매가 거의 같은 시점에 움직인 패턴"
+
+        consistency = "높음" if abs(best["같이움직인정도"]) >= 0.6 and best["통계신뢰도"] >= 0.95 else (
+            "보통" if abs(best["같이움직인정도"]) >= 0.4 and best["통계신뢰도"] >= 0.9 else "낮음"
+        )
+
+        jeonse_to_sale_p = np.nan
+        sale_to_jeonse_p = np.nan
+        if HAS_STATSMODELS and len(group[[sale_col, jeonse_col]].dropna()) >= max_lag * 2 + 3:
+            try:
+                js = grangercausalitytests(group[[sale_col, jeonse_col]].dropna().values, maxlag=max_lag)
+                jeonse_to_sale_p = min(float(js[i][0]["ssr_ftest"][1]) for i in range(1, max_lag + 1))
+            except Exception:
+                pass
+            try:
+                sj = grangercausalitytests(group[[jeonse_col, sale_col]].dropna().values, maxlag=max_lag)
+                sale_to_jeonse_p = min(float(sj[i][0]["ssr_ftest"][1]) for i in range(1, max_lag + 1))
+            except Exception:
+                pass
+
+        rows.append({
+            "지역": name,
+            "선행방향": direction,
+            "먼저움직인기간": abs(best_lag),
+            "최적시차": best_lag,
+            "같이움직인정도": best["같이움직인정도"],
+            "통계신뢰도": best["통계신뢰도"],
+            "반복성": consistency,
+            "표본수": int(best["표본수"]),
+            "전세→매매_p값": round(jeonse_to_sale_p, 4) if pd.notna(jeonse_to_sale_p) else np.nan,
+            "매매→전세_p값": round(sale_to_jeonse_p, 4) if pd.notna(sale_to_jeonse_p) else np.nan,
+            "요약": summary,
+        })
+
+    result = pd.DataFrame(rows)
+    if result.empty:
+        return result
+    result["_반복성순위"] = result["반복성"].map({"높음": 0, "보통": 1, "낮음": 2}).fillna(3)
+    result = result.sort_values(["_반복성순위", "통계신뢰도"], ascending=[True, False]).drop(columns="_반복성순위")
+    return result.reset_index(drop=True)
+
+
+def prepare_screener_dataset(df, lead_lag_df=None, group_col="시도", time_col=None):
+    """지역검색기와 전략검증에서 쓰는 최신 스냅샷 + 변화율 데이터."""
+    time_col = time_col or _infer_time_col(df)
+    if df.empty or group_col not in df.columns or time_col is None or time_col not in df.columns:
+        return pd.DataFrame()
+
+    work = df.copy().sort_values([group_col, time_col])
+    period = 12 if time_col == "연월" else 1
+    for col, new_col in [
+        ("평균가격", "가격_YoY"),
+        ("거래량", "거래량_YoY"),
+        ("전세_보증금평균", "전세_YoY"),
+        ("전세가율", "전세가율_변화"),
+        ("갭비용", "갭비용_변화"),
+        ("미분양소화기간", "미분양소화기간_변화"),
+    ]:
+        if col in work.columns:
+            work[new_col] = _pct_change_by_group(work, group_col, col, periods=period)
+
+    latest = work.groupby(group_col, as_index=False).tail(1).copy()
+    if lead_lag_df is not None and not lead_lag_df.empty:
+        latest = latest.merge(
+            lead_lag_df,
+            left_on=group_col,
+            right_on="지역",
+            how="left",
+            suffixes=("", "_선행신호"),
+        )
+    return latest.reset_index(drop=True)
+
+
+def evaluate_condition_rules(df, rules, combine="AND"):
+    """구조화된 조건 목록을 안전하게 평가한다."""
+    if df.empty:
+        return pd.Series(False, index=df.index)
+    masks = []
+    for rule in rules:
+        col = rule.get("column")
+        op = rule.get("op")
+        value = rule.get("value")
+        value2 = rule.get("value2")
+        if not col or col not in df.columns:
+            masks.append(pd.Series(False, index=df.index))
+            continue
+        s = df[col]
+        try:
+            if op == ">":
+                mask = s.astype(float) > float(value)
+            elif op == ">=":
+                mask = s.astype(float) >= float(value)
+            elif op == "<":
+                mask = s.astype(float) < float(value)
+            elif op == "<=":
+                mask = s.astype(float) <= float(value)
+            elif op == "between":
+                lo, hi = sorted([float(value), float(value2)])
+                mask = s.astype(float).between(lo, hi)
+            elif op == "==":
+                mask = s.astype(str) == str(value)
+            elif op == "contains":
+                mask = s.astype(str).str.contains(str(value), na=False)
+            else:
+                mask = pd.Series(False, index=df.index)
+        except Exception:
+            mask = pd.Series(False, index=df.index)
+        masks.append(mask.fillna(False))
+
+    if not masks:
+        return pd.Series(True, index=df.index)
+    result = masks[0]
+    for mask in masks[1:]:
+        result = (result | mask) if combine == "OR" else (result & mask)
+    return result.fillna(False)
+
+
+def run_region_backtest(
+    df,
+    rules,
+    combine="AND",
+    price_col="평균가격",
+    group_col="시도",
+    time_col=None,
+    horizons=(6, 12, 24),
+):
+    """조건이 켜진 뒤 지역 가격이 어떻게 움직였는지 검증한다."""
+    time_col = time_col or _infer_time_col(df)
+    if df.empty or price_col not in df.columns or group_col not in df.columns or time_col not in df.columns:
+        return pd.DataFrame(), pd.DataFrame()
+
+    work = df.copy().sort_values([group_col, time_col]).reset_index(drop=True)
+    work["진입신호"] = evaluate_condition_rules(work, rules, combine=combine)
+
+    rows = []
+    for region, group in work.groupby(group_col):
+        group = group.sort_values(time_col).reset_index(drop=True)
+        for idx, row in group[group["진입신호"]].iterrows():
+            entry_price = row.get(price_col)
+            if pd.isna(entry_price) or entry_price == 0:
+                continue
+            result = {"지역": region, "진입시점": row[time_col], "진입가격": entry_price}
+            for h in horizons:
+                future_idx = idx + int(h)
+                if future_idx < len(group):
+                    future_price = group.loc[future_idx, price_col]
+                    result[f"{h}기간후수익률"] = (future_price / entry_price - 1) * 100 if pd.notna(future_price) else np.nan
+                else:
+                    result[f"{h}기간후수익률"] = np.nan
+            rows.append(result)
+
+    signals = pd.DataFrame(rows)
+    if signals.empty:
+        return signals, pd.DataFrame()
+
+    summary_rows = []
+    for region, group in signals.groupby("지역"):
+        summary = {"지역": region, "반복횟수": len(group)}
+        for h in horizons:
+            col = f"{h}기간후수익률"
+            valid = group[col].dropna()
+            summary[f"{h}기간후_평균수익률"] = valid.mean() if len(valid) else np.nan
+            summary[f"{h}기간후_성공률"] = (valid > 0).mean() * 100 if len(valid) else np.nan
+        return_cols = [c for c in group.columns if c.endswith("기간후수익률")]
+        all_returns = group[return_cols].stack().dropna() if return_cols else pd.Series(dtype=float)
+        summary["최대하락폭"] = all_returns.min() if len(all_returns) else np.nan
+        summary_rows.append(summary)
+
+    summary_df = pd.DataFrame(summary_rows)
+    sort_col = f"{horizons[1] if len(horizons) > 1 else horizons[0]}기간후_평균수익률"
+    if sort_col in summary_df.columns:
+        summary_df = summary_df.sort_values([sort_col, "반복횟수"], ascending=[False, False])
+    return signals, summary_df.reset_index(drop=True)
+
+
 def scatter_analysis(df, var_x, var_y, group_col="시도"):
     """
     산점도 데이터 + 전체 회귀선 계산

@@ -256,6 +256,11 @@ def process_nps_data(chunksize=200_000):
                     df[col].str.replace(",", ""), errors="coerce"
                 ).fillna(0)
 
+            # 동일 월 원천 파일이 합본에 중복 포함된 경우를 방지한다.
+            # NPS는 사업장 단위 원천행을 시군구로 합산하므로, 완전히 같은
+            # 원천행이 반복되면 가입자수/사업장수/고지금액이 모두 2배로 튄다.
+            df = df.drop_duplicates()
+
             # 시군구 + 연월 단위 집계
             agg = (
                 df.groupby(["지역코드", "연월"])
