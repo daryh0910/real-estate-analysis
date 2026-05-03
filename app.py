@@ -2446,12 +2446,21 @@ with super_tab:
                 multi=True,
             )
         with sc_c3:
+            population_cols = {
+                "총인구", "남자인구", "여자인구", "20대", "남_20대", "여_20대",
+                "30대", "남_30대", "여_30대", "40대", "남_40대", "여_40대",
+                "50대이상", "남_50대이상", "여_50대이상",
+            }
+            is_population_chart = bool(set(sc_indicators or []) & population_cols)
+            default_mode_index = 0 if is_population_chart else 1
             sc_mode = st.selectbox(
                 "보기 방식",
                 ["원값", "같은 기준으로 비교", "전년 대비", "전월 대비"],
-                index=1,
+                index=default_mode_index,
                 key="super_mode",
             )
+            if is_population_chart and sc_time_col == "연월":
+                st.caption("인구 지표는 연간 데이터라 월별 화면에서는 같은 연도 안에서 같은 값이 반복됩니다.")
 
         custom_expr = st.text_input(
             "사용자 지표",
@@ -2507,6 +2516,7 @@ with super_tab:
                         sc_time_col: group[sc_time_col],
                         "지역": region,
                         "지표": ind,
+                        "계열": f"{region} · {_indicator_label(ind)}",
                         "표시값": value,
                         "축": label,
                     })
@@ -2520,8 +2530,8 @@ with super_tab:
                     sc_long.dropna(subset=["표시값"]).sort_values(sc_time_col),
                     x=sc_time_col,
                     y="표시값",
-                    color="지표",
-                    line_dash="지역",
+                    color="계열",
+                    line_dash="지표",
                     markers=True,
                     title="자유차트",
                     labels={sc_time_col: "기간", "표시값": sc_long["축"].dropna().iloc[0]},
