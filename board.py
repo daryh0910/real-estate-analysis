@@ -23,9 +23,10 @@ IMAGE_DIR = os.path.join(os.path.dirname(__file__), "board_images")
 @contextlib.contextmanager
 def get_db():
     """SQLite 연결 context manager. row_factory=sqlite3.Row 사용."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
     try:
         yield conn
         conn.commit()
@@ -71,6 +72,38 @@ def init_db():
                 session_id TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 UNIQUE(post_id, session_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS saved_charts (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_hash    TEXT NOT NULL DEFAULT 'default',
+                name          TEXT NOT NULL,
+                settings_json TEXT NOT NULL,
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT,
+                UNIQUE(owner_hash, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS saved_conditions (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_hash TEXT NOT NULL DEFAULT 'default',
+                name       TEXT NOT NULL,
+                rules_json TEXT NOT NULL,
+                combine    TEXT NOT NULL DEFAULT 'AND',
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                UNIQUE(owner_hash, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS watchlists (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_hash      TEXT NOT NULL DEFAULT 'default',
+                region          TEXT NOT NULL,
+                conditions_json TEXT,
+                alert_on        INTEGER NOT NULL DEFAULT 0,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT,
+                UNIQUE(owner_hash, region)
             );
         """)
 
@@ -222,6 +255,141 @@ def get_comments(post_id: int) -> list:
             (post_id,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ── 개인 저장소: 차트 / 조건 / 관심지역 ─────────────────────────────────
+DEFAULT_OWNER = "default"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def save_chart_settings(name: str, settings: dict, owner_hash: str = DEFAULT_OWNER) -> int:
+    """자유차트 설정 저장. 같은 이름은 덮어쓴다."""
+    now = _utc_now()
+    payload = json.dumps(settings or {}, ensure_ascii=False)
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO saved_charts (owner_hash, name, settings_json, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(owner_hash, name)
+               DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at""",
+            (owner_hash, name, payload, now, now),
+        )
+        row = conn.execute(
+            "SELECT id FROM saved_charts WHERE owner_hash = ? AND name = ?",
+            (owner_hash, name),
+        ).fetchone()
+        return int(row["id"])
+
+
+def list_saved_charts(owner_hash: str = DEFAULT_OWNER) -> list:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM saved_charts WHERE owner_hash = ? ORDER BY updated_at DESC, created_at DESC",
+            (owner_hash,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_saved_chart(chart_id: int, owner_hash: str = DEFAULT_OWNER) -> dict:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM saved_charts WHERE id = ? AND owner_hash = ?",
+            (chart_id, owner_hash),
+        ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["settings"] = json.loads(result.get("settings_json") or "{}")
+        return result
+
+
+def delete_saved_chart(chart_id: int, owner_hash: str = DEFAULT_OWNER) -> bool:
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM saved_charts WHERE id = ? AND owner_hash = ?",
+            (chart_id, owner_hash),
+        )
+        return cur.rowcount > 0
+
+
+def save_condition_set(name: str, rules: list, combine: str = "AND", owner_hash: str = DEFAULT_OWNER) -> int:
+    """조건 빌더 규칙 저장. 같은 이름은 덮어쓴다."""
+    now = _utc_now()
+    payload = json.dumps(rules or [], ensure_ascii=False)
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO saved_conditions (owner_hash, name, rules_json, combine, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(owner_hash, name)
+               DO UPDATE SET rules_json = excluded.rules_json, combine = excluded.combine, updated_at = excluded.updated_at""",
+            (owner_hash, name, payload, combine, now, now),
+        )
+        row = conn.execute(
+            "SELECT id FROM saved_conditions WHERE owner_hash = ? AND name = ?",
+            (owner_hash, name),
+        ).fetchone()
+        return int(row["id"])
+
+
+def list_saved_conditions(owner_hash: str = DEFAULT_OWNER) -> list:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM saved_conditions WHERE owner_hash = ? ORDER BY updated_at DESC, created_at DESC",
+            (owner_hash,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["rules"] = json.loads(item.get("rules_json") or "[]")
+            result.append(item)
+        return result
+
+
+def upsert_watchlist(region: str, conditions: list = None, alert_on: bool = False, owner_hash: str = DEFAULT_OWNER) -> int:
+    """관심지역 등록. 같은 지역은 조건/알림 설정을 갱신한다."""
+    now = _utc_now()
+    payload = json.dumps(conditions or [], ensure_ascii=False)
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO watchlists (owner_hash, region, conditions_json, alert_on, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(owner_hash, region)
+               DO UPDATE SET conditions_json = excluded.conditions_json,
+                             alert_on = excluded.alert_on,
+                             updated_at = excluded.updated_at""",
+            (owner_hash, region, payload, int(bool(alert_on)), now, now),
+        )
+        row = conn.execute(
+            "SELECT id FROM watchlists WHERE owner_hash = ? AND region = ?",
+            (owner_hash, region),
+        ).fetchone()
+        return int(row["id"])
+
+
+def list_watchlists(owner_hash: str = DEFAULT_OWNER) -> list:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM watchlists WHERE owner_hash = ? ORDER BY updated_at DESC, created_at DESC",
+            (owner_hash,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["conditions"] = json.loads(item.get("conditions_json") or "[]")
+            result.append(item)
+        return result
+
+
+def delete_watchlist(watchlist_id: int, owner_hash: str = DEFAULT_OWNER) -> bool:
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM watchlists WHERE id = ? AND owner_hash = ?",
+            (watchlist_id, owner_hash),
+        )
+        return cur.rowcount > 0
 
 
 # ── 설정 캡처 ──────────────────────────────────────────────

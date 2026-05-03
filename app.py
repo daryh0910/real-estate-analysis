@@ -12,7 +12,15 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from data_loader import load_all_data, load_apt_data, load_rent_data, get_sigungu_name
-from board import init_db
+from board import (
+    init_db,
+    delete_saved_chart,
+    list_saved_charts,
+    list_watchlists,
+    save_chart_settings,
+    save_condition_set,
+    upsert_watchlist,
+)
 from analysis import (
     correlation_matrix,
     correlation_by_region,
@@ -550,6 +558,23 @@ def _source_caption(cols):
         else:
             items.append(str(col))
     return "출처: " + ", ".join(dict.fromkeys(items))
+
+
+def _apply_saved_widget_settings(settings):
+    for key, value in (settings or {}).items():
+        st.session_state[key] = value
+
+
+def _chart_save_payload(extra=None):
+    keys = [
+        "super_regions", "super_indicators_group", "super_indicators", "super_mode",
+        "super_custom_expr", "super_custom_label", "analysis_mode", "selected_sido",
+        "selected_years", "freq",
+    ]
+    payload = {k: st.session_state[k] for k in keys if k in st.session_state}
+    if extra:
+        payload.update(extra)
+    return payload
 
 
 def _numeric_rule_columns(df):
@@ -2382,6 +2407,23 @@ with super_tab:
     if chart_src.empty:
         st.warning("자유차트에 표시할 데이터가 없습니다.")
     else:
+        saved_charts = list_saved_charts()
+        with st.expander("저장된 차트", expanded=False):
+            if saved_charts:
+                chart_labels = {f"{row['name']} · {row['updated_at'] or row['created_at']}": row for row in saved_charts}
+                selected_saved_chart = st.selectbox("불러올 차트", list(chart_labels.keys()), key="saved_chart_select")
+                sc_load_col, sc_delete_col = st.columns(2)
+                with sc_load_col:
+                    if st.button("차트 불러오기", key="load_saved_chart"):
+                        _apply_saved_widget_settings(json.loads(chart_labels[selected_saved_chart]["settings_json"] or "{}"))
+                        st.rerun()
+                with sc_delete_col:
+                    if st.button("저장 차트 삭제", key="delete_saved_chart"):
+                        delete_saved_chart(int(chart_labels[selected_saved_chart]["id"]))
+                        st.rerun()
+            else:
+                st.info("아직 저장된 차트가 없습니다.")
+
         sc_time_col = "연월" if freq == "월별" and "연월" in chart_src.columns else "연도"
         sc_numeric = _numeric_rule_columns(chart_src)
         sc_defaults = [c for c in ["평균가격", "전세_보증금평균", "전세가율", "거래량", "PIR", "갭비용"] if c in sc_numeric]
@@ -2487,6 +2529,18 @@ with super_tab:
                 register_fig("자유차트_슈퍼차트", fig_super, "자유차트")
                 st.plotly_chart(fig_super, use_container_width=True)
                 st.caption(_source_caption(sc_indicators))
+                save_col1, save_col2 = st.columns([2, 1])
+                with save_col1:
+                    sc_save_name = st.text_input("차트 저장 이름", value="내 자유차트", key="super_save_name")
+                with save_col2:
+                    st.write("")
+                    st.write("")
+                    if st.button("현재 차트 저장", key="super_save_button"):
+                        save_chart_settings(
+                            sc_save_name.strip() or "내 자유차트",
+                            _chart_save_payload({"time_col": sc_time_col}),
+                        )
+                        st.success("차트 설정을 저장했습니다.")
 
         with st.expander("전세-매매 선행 신호 같이 보기"):
             if "평균가격" in chart_src.columns and "전세_보증금평균" in chart_src.columns:
@@ -2544,6 +2598,14 @@ with strategy_tab:
         ]
         bt_defaults = [r for r in bt_defaults if r]
         bt_rules, bt_combine = _render_condition_builder("bt", bt_cols, default_rules=bt_defaults)
+        with st.expander("조건 저장", expanded=False):
+            bt_condition_name = st.text_input("조건 이름", value="전략검증 조건", key="bt_condition_name")
+            if st.button("현재 조건 저장", key="bt_save_condition"):
+                if bt_rules:
+                    save_condition_set(bt_condition_name.strip() or "전략검증 조건", bt_rules, bt_combine)
+                    st.success("조건을 저장했습니다.")
+                else:
+                    st.warning("저장할 조건이 없습니다.")
 
         bt_h1, bt_h2, bt_h3, bt_h4, bt_h5 = st.columns(5)
         with bt_h1:
@@ -3600,6 +3662,13 @@ with listing_tab:
                     default_rules=screen_defaults,
                     max_rules=6,
                 )
+                screen_condition_name = st.text_input("검색 조건 저장 이름", value="지역검색 조건", key="screen_condition_name")
+                if st.button("검색 조건 저장", key="screen_save_condition"):
+                    if screen_rules:
+                        save_condition_set(screen_condition_name.strip() or "지역검색 조건", screen_rules, screen_combine)
+                        st.success("검색 조건을 저장했습니다.")
+                    else:
+                        st.warning("저장할 조건이 없습니다.")
 
             if screen_rules:
                 screen_mask = evaluate_condition_rules(screen_df, screen_rules, combine=screen_combine)
@@ -3645,6 +3714,31 @@ with listing_tab:
                     mime="text/csv",
                     key="screen_download",
                 )
+                watch_col1, watch_col2, watch_col3 = st.columns([2, 1, 1])
+                with watch_col1:
+                    watch_region = st.selectbox(
+                        "관심지역 등록",
+                        screen_result["시도"].dropna().astype(str).tolist(),
+                        key="screen_watch_region",
+                    )
+                with watch_col2:
+                    watch_alert = st.checkbox("알림 대상", value=False, key="screen_watch_alert")
+                with watch_col3:
+                    st.write("")
+                    st.write("")
+                    if st.button("등록", key="screen_watch_add"):
+                        upsert_watchlist(watch_region, screen_rules, alert_on=watch_alert)
+                        st.success(f"{watch_region}을 관심지역에 등록했습니다.")
+                with st.expander("관심지역 목록"):
+                    watchlists = list_watchlists()
+                    if watchlists:
+                        st.dataframe(
+                            pd.DataFrame(watchlists)[["region", "alert_on", "updated_at", "created_at"]],
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    else:
+                        st.info("관심지역이 없습니다.")
 
     st.divider()
 
