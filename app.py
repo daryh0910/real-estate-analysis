@@ -24,8 +24,12 @@ from analysis import (
     granger_causality_test,
     compute_lead_lag_signal,
     evaluate_condition_rules,
+    pct_from_peak,
+    peak_drawdown_then_rebound,
     prepare_screener_dataset,
     run_region_backtest,
+    rolling_consecutive_change,
+    vs_moving_avg,
     compute_value_score,
     compute_market_temperature,
     interpolate_quintile_to_percentile,
@@ -556,6 +560,35 @@ def _numeric_rule_columns(df):
     ]
 
 
+def _dataset_quality_snapshot(datasets):
+    rows = []
+    cache_dir = "cache"
+    cache_files = [
+        os.path.join(cache_dir, f) for f in os.listdir(cache_dir)
+        if os.path.isfile(os.path.join(cache_dir, f))
+    ] if os.path.isdir(cache_dir) else []
+    latest_cache = max((os.path.getmtime(p) for p in cache_files), default=None)
+    for name, df in datasets.items():
+        if df is None or df.empty:
+            continue
+        region_col = "시도" if "시도" in df.columns else ("시군구" if "시군구" in df.columns else None)
+        numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+        missing_region_count = 0
+        if region_col and numeric_cols:
+            missing_region_count = int(
+                df.groupby(region_col)[numeric_cols]
+                .apply(lambda g: g.isna().any(axis=1).any())
+                .sum()
+            )
+        rows.append({
+            "데이터셋": name,
+            "행": len(df),
+            "지역수": df[region_col].nunique() if region_col else np.nan,
+            "결측있는지역": missing_region_count,
+        })
+    return pd.DataFrame(rows), latest_cache, len(cache_files)
+
+
 def _render_condition_builder(prefix, candidate_cols, default_rules=None, max_rules=5):
     """지역검색기와 전략검증에서 공유하는 조건 빌더."""
     default_rules = default_rules or []
@@ -579,7 +612,7 @@ def _render_condition_builder(prefix, candidate_cols, default_rules=None, max_ru
             enabled = st.checkbox("사용", value=i < len(default_rules), key=f"{prefix}_rule_enabled_{i}")
             if not enabled:
                 continue
-            c0, c1, c2, c3, c4 = st.columns([1.4, 2.2, 1.1, 1.3, 1.3])
+            c_type, c0, c1, c2, c3, c4 = st.columns([1.6, 1.4, 2.2, 1.1, 1.3, 1.3])
             catalog_groups = []
             for item in INDICATOR_CATALOG:
                 if item["column"] in candidate_cols and item["group"] not in catalog_groups:
@@ -587,6 +620,25 @@ def _render_condition_builder(prefix, candidate_cols, default_rules=None, max_ru
             fallback_cols = [c for c in candidate_cols if c not in INDICATOR_META]
             default_col = default.get("column", candidate_cols[0])
             default_group = INDICATOR_META.get(default_col, {}).get("group", catalog_groups[0] if catalog_groups else "(기타)")
+            condition_types = {
+                "값 비교": "compare",
+                "연속 상승": "consecutive_up",
+                "연속 하락": "consecutive_down",
+                "이동평균 위": "vs_moving_avg_above",
+                "이동평균 아래": "vs_moving_avg_below",
+                "고점 대비": "pct_from_peak",
+                "하락 후 반등": "peak_drawdown_then_rebound",
+            }
+            reverse_types = {v: k for k, v in condition_types.items()}
+            default_type = reverse_types.get(default.get("type", "compare"), "값 비교")
+            with c_type:
+                selected_type_label = st.selectbox(
+                    "조건유형",
+                    list(condition_types.keys()),
+                    index=list(condition_types.keys()).index(default_type),
+                    key=f"{prefix}_rule_type_{i}",
+                )
+                selected_type = condition_types[selected_type_label]
             with c0:
                 group_options = catalog_groups + (["(기타)"] if fallback_cols else [])
                 group_index = group_options.index(default_group) if default_group in group_options else 0
@@ -610,29 +662,65 @@ def _render_condition_builder(prefix, candidate_cols, default_rules=None, max_ru
                     st.caption(f"{meta['source']} | {meta['unit']} | {meta['best_for']}")
             with c2:
                 default_op = default.get("op", ">")
+                op_options = ["<=", "<", ">=", ">", "between"] if selected_type == "pct_from_peak" else ops
                 op = st.selectbox(
                     "조건",
-                    ops,
-                    index=ops.index(default_op) if default_op in ops else 0,
+                    op_options,
+                    index=op_options.index(default_op) if default_op in op_options else 0,
                     key=f"{prefix}_rule_op_{i}",
+                    disabled=selected_type in [
+                        "consecutive_up", "consecutive_down", "vs_moving_avg_above",
+                        "vs_moving_avg_below", "peak_drawdown_then_rebound",
+                    ],
                 )
             with c3:
+                value_label = {
+                    "compare": "값",
+                    "consecutive_up": "연속기간",
+                    "consecutive_down": "연속기간",
+                    "vs_moving_avg_above": "평균기간",
+                    "vs_moving_avg_below": "평균기간",
+                    "pct_from_peak": "기준(%)",
+                    "peak_drawdown_then_rebound": "하락률(%)",
+                }.get(selected_type, "값")
                 value = st.text_input(
-                    "값",
+                    value_label,
                     value=str(default.get("value", "")),
                     key=f"{prefix}_rule_value_{i}",
-                    placeholder="예: 15 또는 전세 선행",
+                    placeholder="예: 15, 3, -20",
                 )
             with c4:
+                value2_label = "상한" if selected_type == "compare" else (
+                    "반등률(%)" if selected_type == "peak_drawdown_then_rebound"
+                    else ("여유폭(%)" if selected_type.startswith("vs_moving_avg") else "최소변화(%)")
+                )
                 value2 = st.text_input(
-                    "상한",
+                    value2_label,
                     value=str(default.get("value2", "")),
                     key=f"{prefix}_rule_value2_{i}",
-                    placeholder="between일 때",
-                    disabled=op != "between",
+                    placeholder="선택 입력",
+                    disabled=selected_type == "pct_from_peak" or (selected_type == "compare" and op != "between"),
                 )
             if value.strip():
-                rules.append({"column": column, "op": op, "value": value.strip(), "value2": value2.strip()})
+                rule = {"column": column, "op": op, "value": value.strip(), "value2": value2.strip()}
+                if selected_type == "consecutive_up":
+                    rule.update({"type": "consecutive_up", "n": value.strip(), "min_change": value2.strip() or 0, "group_col": "시도"})
+                elif selected_type == "consecutive_down":
+                    rule.update({"type": "consecutive_down", "n": value.strip(), "min_change": value2.strip() or 0, "group_col": "시도"})
+                elif selected_type == "vs_moving_avg_above":
+                    rule.update({"type": "vs_moving_avg", "window": value.strip(), "direction": "above", "threshold_pct": value2.strip() or 0, "group_col": "시도"})
+                elif selected_type == "vs_moving_avg_below":
+                    rule.update({"type": "vs_moving_avg", "window": value.strip(), "direction": "below", "threshold_pct": value2.strip() or 0, "group_col": "시도"})
+                elif selected_type == "pct_from_peak":
+                    rule.update({"type": "pct_from_peak", "group_col": "시도"})
+                elif selected_type == "peak_drawdown_then_rebound":
+                    rule.update({
+                        "type": "peak_drawdown_then_rebound",
+                        "drawdown_pct": value.strip(),
+                        "rebound_pct": value2.strip() or 5,
+                        "group_col": "시도",
+                    })
+                rules.append(rule)
     return rules, combine
 
 
@@ -647,6 +735,31 @@ def _format_signal_summary(row):
 with main_tab1:
     st.header(f"시장 Overview ({mode_label})")
     st.caption("역사는 반복된다는 관점에서 과거 국면, 수요·공급의 움직임, 현재와 닮은 신호를 한 화면에서 추적합니다.")
+    quality_df, latest_cache_mtime, cache_file_count = _dataset_quality_snapshot({
+        "연간통합": yearly_df,
+        "월간통합": monthly_df,
+        "매매": apt_df,
+        "전세": jeonse_df,
+        "월세": wolse_df,
+    })
+    latest_cache_label = (
+        pd.to_datetime(latest_cache_mtime, unit="s").strftime("%Y-%m-%d %H:%M")
+        if latest_cache_mtime else "확인불가"
+    )
+    missing_regions = int(quality_df["결측있는지역"].sum()) if not quality_df.empty else 0
+    st.caption(
+        f"데이터 신뢰도: 캐시 생성 {latest_cache_label} | 데이터셋 {len(quality_df)}개 "
+        f"| 캐시파일 {cache_file_count}개 | 결측 있는 지역 {missing_regions}개"
+    )
+    with st.expander("데이터 신뢰도 상세"):
+        if quality_df.empty:
+            st.info("표시할 데이터셋이 없습니다.")
+        else:
+            st.dataframe(
+                quality_df.style.format({"행": "{:,.0f}", "지역수": "{:,.0f}", "결측있는지역": "{:,.0f}"}, na_rep="N/A"),
+                use_container_width=True,
+                height=220,
+            )
 
     # ──────────────────────────────────────────────────
     # Zone A: 시장 온도계 (Hero Section)
@@ -2432,7 +2545,7 @@ with strategy_tab:
         bt_defaults = [r for r in bt_defaults if r]
         bt_rules, bt_combine = _render_condition_builder("bt", bt_cols, default_rules=bt_defaults)
 
-        bt_h1, bt_h2, bt_h3 = st.columns(3)
+        bt_h1, bt_h2, bt_h3, bt_h4, bt_h5 = st.columns(5)
         with bt_h1:
             bt_price_col = _render_indicator_picker(
                 "성과 기준 가격",
@@ -2446,6 +2559,25 @@ with strategy_tab:
             bt_horizons = st.multiselect("확인 기간", [3, 6, 12, 24], default=[6, 12, 24], key="bt_horizons")
         with bt_h3:
             bt_group = st.selectbox("검증 단위", ["시도"], key="bt_group")
+        with bt_h4:
+            bt_cooldown = st.number_input(
+                "중복 신호 쉬는 기간",
+                min_value=0,
+                max_value=36,
+                value=6 if bt_time_col == "연월" else 1,
+                step=1,
+                key="bt_cooldown",
+                help="한 번 진입 신호가 켜진 뒤 지정 기간 안의 반복 신호는 같은 매수 기회로 보고 제외합니다.",
+            )
+        with bt_h5:
+            bt_success_threshold = st.number_input(
+                "성공 기준 수익률(%)",
+                value=0.0,
+                step=0.5,
+                key="bt_success_threshold",
+                help="성공률은 진입 신호 이후 선택 기간 수익률이 이 값을 초과한 비율입니다.",
+            )
+        st.caption("최대하락폭은 신호별 선택 기간 수익률 중 가장 낮은 값을 지역별로 다시 최저 집계한 값입니다.")
 
         if st.button("전략검증 실행", key="bt_run", type="primary"):
             if not bt_rules:
@@ -2459,6 +2591,8 @@ with strategy_tab:
                     group_col=bt_group,
                     time_col=bt_time_col,
                     horizons=tuple(bt_horizons or [6, 12]),
+                    cooldown_periods=int(bt_cooldown),
+                    success_threshold=float(bt_success_threshold),
                 )
                 if summary.empty:
                     st.info("조건을 만족한 과거 시점이 없거나 이후 수익률을 계산할 데이터가 부족합니다.")

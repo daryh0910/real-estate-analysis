@@ -22,7 +22,7 @@ except ImportError:
 # 다중회귀/Granger 인과검정용
 try:
     import statsmodels.api as sm
-    from statsmodels.tsa.stattools import grangercausalitytests
+    from statsmodels.tsa.stattools import adfuller, grangercausalitytests
     HAS_STATSMODELS = True
 except ImportError:
     HAS_STATSMODELS = False
@@ -124,6 +124,127 @@ def _pct_change_by_group(df, group_col, value_col, periods=1):
     return df.groupby(group_col)[value_col].pct_change(periods=periods, fill_method=None) * 100
 
 
+def _series_is_stationary(series, alpha=0.05):
+    """ADF 검정으로 정상성 여부를 보수적으로 확인한다."""
+    if not HAS_STATSMODELS:
+        return None
+    clean = pd.Series(series).replace([np.inf, -np.inf], np.nan).dropna()
+    if len(clean) < 8 or clean.nunique() <= 1:
+        return None
+    try:
+        return bool(adfuller(clean, autolag="AIC")[1] <= alpha)
+    except Exception:
+        return None
+
+
+def _stationary_series(series, alpha=0.05):
+    """비정상 시계열이면 1차 차분해 허위 선행 신호를 줄인다."""
+    clean = pd.Series(series).astype(float).replace([np.inf, -np.inf], np.nan)
+    stationary = _series_is_stationary(clean, alpha=alpha)
+    if stationary is False:
+        return clean.diff(), "ADF차분"
+    return clean, "원자료" if stationary is True else "ADF미확인"
+
+
+def _group_transform(df, group_col, col, func):
+    if group_col and group_col in df.columns:
+        return df.groupby(group_col, group_keys=False)[col].transform(func)
+    return func(df[col])
+
+
+def rolling_consecutive_change(df, col, n=3, direction="up", group_col=None, min_change=0):
+    """
+    n기간 연속 상승/하락 여부를 계산한다.
+
+    min_change는 각 기간 변화율 기준(%)이다. 예: n=3, direction="up", min_change=0이면
+    3기간 연속 전기 대비 상승한 행만 True다.
+    """
+    if df.empty or col not in df.columns:
+        return pd.Series(False, index=df.index)
+    n = int(max(1, n))
+    min_change = float(min_change or 0)
+
+    def _calc(s):
+        pct = pd.to_numeric(s, errors="coerce").pct_change(fill_method=None) * 100
+        hit = pct >= min_change if direction == "up" else pct <= -abs(min_change)
+        return hit.rolling(n, min_periods=n).sum().eq(n)
+
+    return _group_transform(df, group_col, col, _calc).fillna(False).astype(bool)
+
+
+def vs_moving_avg(df, col, window=12, direction="above", threshold_pct=0, group_col=None):
+    """현재 값이 이동평균보다 일정 비율 이상 위/아래인지 계산한다."""
+    if df.empty or col not in df.columns:
+        return pd.Series(False, index=df.index)
+    window = int(max(1, window))
+    threshold_pct = float(threshold_pct or 0)
+
+    def _calc(s):
+        numeric = pd.to_numeric(s, errors="coerce")
+        ma = numeric.rolling(window, min_periods=window).mean()
+        ratio = (numeric / ma - 1) * 100
+        return ratio >= threshold_pct if direction == "above" else ratio <= -abs(threshold_pct)
+
+    return _group_transform(df, group_col, col, _calc).fillna(False).astype(bool)
+
+
+def pct_from_peak(df, col, window=None, group_col=None):
+    """현재 값이 최근/누적 고점 대비 몇 % 아래인지 계산한다. 고점이면 0, 하락이면 음수다."""
+    if df.empty or col not in df.columns:
+        return pd.Series(np.nan, index=df.index)
+    window = int(window) if window else None
+
+    def _calc(s):
+        numeric = pd.to_numeric(s, errors="coerce")
+        peak = numeric.rolling(window, min_periods=1).max() if window else numeric.cummax()
+        return (numeric / peak - 1) * 100
+
+    return _group_transform(df, group_col, col, _calc)
+
+
+def peak_drawdown_then_rebound(df, col, drawdown_pct=-20, rebound_pct=5, window=None, group_col=None):
+    """고점 대비 충분히 하락한 뒤 직전 저점에서 반등했는지 계산한다."""
+    if df.empty or col not in df.columns:
+        return pd.Series(False, index=df.index)
+    drawdown_pct = float(drawdown_pct)
+    rebound_pct = float(rebound_pct)
+    window = int(window) if window else None
+
+    def _calc(s):
+        numeric = pd.to_numeric(s, errors="coerce")
+        peak = numeric.rolling(window, min_periods=1).max() if window else numeric.cummax()
+        drawdown = (numeric / peak - 1) * 100
+        trough = numeric.cummin()
+        if window:
+            trough = numeric.rolling(window, min_periods=1).min()
+        rebound = (numeric / trough - 1) * 100
+        return (drawdown <= drawdown_pct) & (rebound >= rebound_pct)
+
+    return _group_transform(df, group_col, col, _calc).fillna(False).astype(bool)
+
+
+def _compare_series(s, op, value, value2=None):
+    try:
+        if op == ">":
+            return s.astype(float) > float(value)
+        if op == ">=":
+            return s.astype(float) >= float(value)
+        if op == "<":
+            return s.astype(float) < float(value)
+        if op == "<=":
+            return s.astype(float) <= float(value)
+        if op == "between":
+            lo, hi = sorted([float(value), float(value2)])
+            return s.astype(float).between(lo, hi)
+        if op == "==":
+            return s.astype(str) == str(value)
+        if op == "contains":
+            return s.astype(str).str.contains(str(value), na=False)
+    except Exception:
+        pass
+    return pd.Series(False, index=s.index)
+
+
 def compute_lead_lag_signal(
     df,
     sale_col="평균가격",
@@ -155,9 +276,11 @@ def compute_lead_lag_signal(
         if use_pct_change:
             sale = group[sale_col].astype(float).pct_change() * 100
             jeonse = group[jeonse_col].astype(float).pct_change() * 100
+            sale_preprocess = "변화율"
+            jeonse_preprocess = "변화율"
         else:
-            sale = group[sale_col].astype(float)
-            jeonse = group[jeonse_col].astype(float)
+            sale, sale_preprocess = _stationary_series(group[sale_col])
+            jeonse, jeonse_preprocess = _stationary_series(group[jeonse_col])
 
         lag_rows = []
         for lag in range(-max_lag, max_lag + 1):
@@ -220,6 +343,8 @@ def compute_lead_lag_signal(
             "표본수": int(best["표본수"]),
             "전세→매매_p값": round(jeonse_to_sale_p, 4) if pd.notna(jeonse_to_sale_p) else np.nan,
             "매매→전세_p값": round(sale_to_jeonse_p, 4) if pd.notna(sale_to_jeonse_p) else np.nan,
+            "가격전처리": sale_preprocess,
+            "전세전처리": jeonse_preprocess,
             "요약": summary,
         })
 
@@ -266,35 +391,58 @@ def evaluate_condition_rules(df, rules, combine="AND"):
     """구조화된 조건 목록을 안전하게 평가한다."""
     if df.empty:
         return pd.Series(False, index=df.index)
+    if isinstance(rules, dict):
+        rules = [rules]
     masks = []
     for rule in rules:
-        col = rule.get("column")
+        if "children" in rule:
+            child_mask = evaluate_condition_rules(
+                df,
+                rule.get("children", []),
+                combine=rule.get("combine", "AND"),
+            )
+            masks.append(child_mask.fillna(False))
+            continue
+        rule_type = rule.get("type", "compare")
+        col = rule.get("column") or rule.get("col")
         op = rule.get("op")
         value = rule.get("value")
         value2 = rule.get("value2")
         if not col or col not in df.columns:
             masks.append(pd.Series(False, index=df.index))
             continue
-        s = df[col]
-        try:
-            if op == ">":
-                mask = s.astype(float) > float(value)
-            elif op == ">=":
-                mask = s.astype(float) >= float(value)
-            elif op == "<":
-                mask = s.astype(float) < float(value)
-            elif op == "<=":
-                mask = s.astype(float) <= float(value)
-            elif op == "between":
-                lo, hi = sorted([float(value), float(value2)])
-                mask = s.astype(float).between(lo, hi)
-            elif op == "==":
-                mask = s.astype(str) == str(value)
-            elif op == "contains":
-                mask = s.astype(str).str.contains(str(value), na=False)
-            else:
-                mask = pd.Series(False, index=df.index)
-        except Exception:
+
+        if rule_type == "consecutive_up":
+            mask = rolling_consecutive_change(
+                df, col, n=rule.get("n", value or 3), direction="up",
+                group_col=rule.get("group_col"), min_change=rule.get("min_change", 0),
+            )
+        elif rule_type == "consecutive_down":
+            mask = rolling_consecutive_change(
+                df, col, n=rule.get("n", value or 3), direction="down",
+                group_col=rule.get("group_col"), min_change=rule.get("min_change", 0),
+            )
+        elif rule_type == "vs_moving_avg":
+            mask = vs_moving_avg(
+                df, col, window=rule.get("window", value or 12),
+                direction=rule.get("direction", "above"),
+                threshold_pct=rule.get("threshold_pct", 0),
+                group_col=rule.get("group_col"),
+            )
+        elif rule_type == "pct_from_peak":
+            derived = pct_from_peak(df, col, window=rule.get("window"), group_col=rule.get("group_col"))
+            mask = _compare_series(derived, op or "<=", value if value is not None else -10, value2)
+        elif rule_type == "peak_drawdown_then_rebound":
+            mask = peak_drawdown_then_rebound(
+                df, col,
+                drawdown_pct=rule.get("drawdown_pct", value or -20),
+                rebound_pct=rule.get("rebound_pct", value2 or 5),
+                window=rule.get("window"),
+                group_col=rule.get("group_col"),
+            )
+        else:
+            mask = _compare_series(df[col], op, value, value2)
+        if mask is None:
             mask = pd.Series(False, index=df.index)
         masks.append(mask.fillna(False))
 
@@ -314,6 +462,8 @@ def run_region_backtest(
     group_col="시도",
     time_col=None,
     horizons=(6, 12, 24),
+    cooldown_periods=0,
+    success_threshold=0.0,
 ):
     """조건이 켜진 뒤 지역 가격이 어떻게 움직였는지 검증한다."""
     time_col = time_col or _infer_time_col(df)
@@ -326,18 +476,37 @@ def run_region_backtest(
     rows = []
     for region, group in work.groupby(group_col):
         group = group.sort_values(time_col).reset_index(drop=True)
-        for idx, row in group[group["진입신호"]].iterrows():
+        signal_idx = group.index[group["진입신호"]].tolist()
+        if cooldown_periods and cooldown_periods > 0:
+            cooled = []
+            last_idx = -10**9
+            for idx in signal_idx:
+                if idx - last_idx >= int(cooldown_periods):
+                    cooled.append(idx)
+                    last_idx = idx
+            signal_idx = cooled
+        for idx, row in group.loc[signal_idx].iterrows():
             entry_price = row.get(price_col)
             if pd.isna(entry_price) or entry_price == 0:
                 continue
-            result = {"지역": region, "진입시점": row[time_col], "진입가격": entry_price}
+            result = {
+                "지역": region,
+                "진입시점": row[time_col],
+                "진입가격": entry_price,
+                "쿨다운기간": int(cooldown_periods or 0),
+            }
+            horizon_returns = []
             for h in horizons:
                 future_idx = idx + int(h)
                 if future_idx < len(group):
                     future_price = group.loc[future_idx, price_col]
-                    result[f"{h}기간후수익률"] = (future_price / entry_price - 1) * 100 if pd.notna(future_price) else np.nan
+                    return_pct = (future_price / entry_price - 1) * 100 if pd.notna(future_price) else np.nan
+                    result[f"{h}기간후수익률"] = return_pct
+                    if pd.notna(return_pct):
+                        horizon_returns.append(return_pct)
                 else:
                     result[f"{h}기간후수익률"] = np.nan
+            result["신호별최저수익률"] = min(horizon_returns) if horizon_returns else np.nan
             rows.append(result)
 
     signals = pd.DataFrame(rows)
@@ -351,10 +520,12 @@ def run_region_backtest(
             col = f"{h}기간후수익률"
             valid = group[col].dropna()
             summary[f"{h}기간후_평균수익률"] = valid.mean() if len(valid) else np.nan
-            summary[f"{h}기간후_성공률"] = (valid > 0).mean() * 100 if len(valid) else np.nan
-        return_cols = [c for c in group.columns if c.endswith("기간후수익률")]
-        all_returns = group[return_cols].stack().dropna() if return_cols else pd.Series(dtype=float)
-        summary["최대하락폭"] = all_returns.min() if len(all_returns) else np.nan
+            summary[f"{h}기간후_성공률"] = (valid > float(success_threshold)).mean() * 100 if len(valid) else np.nan
+            summary[f"{h}기간후_검증표본"] = int(len(valid))
+        signal_lows = group["신호별최저수익률"].dropna() if "신호별최저수익률" in group.columns else pd.Series(dtype=float)
+        summary["최대하락폭"] = signal_lows.min() if len(signal_lows) else np.nan
+        summary["성공률정의"] = f"각 진입 후 해당 기간 수익률이 {float(success_threshold):.1f}% 초과인 비율"
+        summary["최대하락폭정의"] = "신호별 선택 기간 수익률 중 최저값의 지역 내 최저치"
         summary_rows.append(summary)
 
     summary_df = pd.DataFrame(summary_rows)
