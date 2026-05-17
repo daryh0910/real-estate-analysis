@@ -1,0 +1,979 @@
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!DOCTYPE html>
+<html lang="ko">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+        <meta name="description" content="국토교통부 통계누리 홈페이지 입니다." />
+        <title>국토교통 통계누리</title>
+        
+        <link rel="shortcut icon" href="/portal/resources/favicon/favicon.ico">
+        <link rel="stylesheet" href="/portal/resources/new_css/statistic.css"/>
+        <link rel="stylesheet" href="/portal/resources/new_css/stat.css" />
+        
+<div class="mu-preloader-wrap" id="preLoading2" style="display:none; z-index:101;">
+	<div class="mu-preloader spinner2">
+		<i class="loader"></i>
+		<p>처리 중입니다. <span>잠시만 기다려주시기 바랍니다.</span></p>
+	</div>
+</div>
+
+        <script src="/portal/resources/front/js/vendor/jquery-3.6.0.min.js"></script>
+        <script src="/portal/resources/new_js/jquery-ui.min.js"></script>
+        <script src="/portal/resources/new_js/common.js"></script>
+        <script src="/portal/resources/front/js/bootstrap-5.0.2.min.js"></script>
+        <script src="/portal/resources/new_js/jquery.slimscroll.min.js"></script>
+        <script src="/portal/resources/new_js/swiper.min.js"></script>
+        <script src="/portal/resources/front-legacy/js/common.js"></script>
+    
+        <script src="/portal/resources/ibsheet/ib/common/js/common.js"></script>
+        <script src="/portal/resources/ibsheet/ib/common/js/json2.js"></script>
+        <script src="/portal/resources/ibsheet/ib/IBSheet7/sheet/js/ibleaders.js?version=20160921"></script>
+        <script src="/portal/resources/ibsheet/ib/IBSheet7/sheet/js/ibsheet.js"></script>
+        <script src="/portal/resources/ibsheet/ib/IBSheet7/sheet/js/ibsheetinfo.js"></script>
+
+        <script src="/portal/resources/ibsheet/sbAdmin2/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+        <script src="/portal/resources/ibsheet/sbAdmin2/vendor/jquery-easing/jquery.easing.min.js"></script>
+        <script src="/portal/resources/ibsheet/sbAdmin2/js/sb-admin-2.min.js"></script>
+        <script src="/portal/resources/ibsheet/sbAdmin2/vendor/chart.js/Chart.min.js"></script>
+        <script src="/portal/resources/ibsheet/js/util/common_util.js"></script>
+
+        <script type='text/javascript' src='/portal/resources/highchart/js/highcharts.js'></script>
+        <script type='text/javascript' src='/portal/resources/highchart/js/highcharts-more.js'></script>
+        <script type='text/javascript' src='/portal/resources/highchart/js/boost.js'></script>
+
+<script type="text/javascript">
+
+00
+
+</script>
+
+<script type="text/javascript">
+
+    var colFilterYn = "Y";
+    var dataFilterYn = "Y";
+
+
+    //통계표 파일 다운로드
+    function download() {
+        var fileType = $("input[name='settingRadio']:checked").val();
+        var fileName = "주택건설실적통계(분양)" + "/" + $('select[name = sFormId] option:selected').text();
+
+        var params = {
+            "FileName": fileName + "." + fileType,
+            "SheetName": fileName,
+            "ExcelRowHeight": "25",
+            "SheetDesign": 1,
+            "Merge": 1,
+            "NumberTypeToText": 1,
+            "UserMerge" : "0,0,1,8, 1,6,1,2, 2,6,1,2"
+        };
+
+        let pivotFlag = false;
+        let $pivot = $("#sheet01_Pivot_layer");
+        if ($pivot[0] !== undefined && $pivot[0].style.display === 'block') {
+            pivotFlag = true;
+        }
+
+        // ---------------------------------------
+        var t = new Date();
+        var statName = "주택건설실적통계(분양)";
+        var selectBox = document.getElementById("sFormId");
+        var formName = selectBox.options[selectBox.selectedIndex].text;
+        var comnName = "주택";
+        var rsmPeriod = "매월";
+        var unitName = "호";
+
+        var startDt = document.getElementById("sStart").value;
+        var endDt = document.getElementById("sEnd").value;
+        var printTime = t.getFullYear() + "-" + AddZero(t.getMonth() + 1) + "-" + AddZero(t.getDate()) + "   " + AddZero(t.getHours()) + ":" + AddZero(t.getMinutes());
+        
+        var title = statName + " / " + formName;
+        title += "\r\n다운로드 시간 : " + printTime + "";
+        title += "\r\n|검색기간  : " + startDt + " ~ " + endDt;
+        title += "|검색분야 : " + comnName;
+        title += "|작성주기 : " + rsmPeriod;
+        title += "|단위 : " + unitName;
+        title += "\r\n"
+        params.TitleText = title;
+
+        function AddZero(str) {
+            if ((str + "").length == 1) {
+                return "0" + str;
+            }
+            return str;
+        }
+        // ---------------------------------------
+
+        if (pivotFlag) {
+            if ( fileType == 'xlsx') {
+                sheet01_Pivot.Down2Excel(params);
+            }
+            else {
+                sheet01_Pivot.Down2Text(params);
+            }
+        } else {
+            if ( fileType == 'xlsx') {
+                sheet01.Down2Excel(params);
+            }
+            else {
+                sheet01.Down2Text(params);
+            }
+        }
+
+    }
+
+    function goAjax() {
+        ib.reset();
+    }
+
+    function goformView(){
+        var newFormId = $('#sFormId > option:selected').val();
+        var orgFormId = $('#hFormId').val();
+
+        if(newFormId != orgFormId) {
+            $('#sStart, #sEnd').val(null);
+            $('#hFormId').val(newFormId);
+
+            $('#preLoading2').show();
+            $('#frm').attr({action:'/portal/cate/statView.do', method:'get',target:'_self'}).submit();
+        } else {
+            ib.reset();
+        }
+    }
+
+    //차트닫기
+    function hideChart(){
+        $('#unmark-legend-area').hide();
+        document.getElementById("chart01").style.display = "none";
+        document.getElementById("chartHide").style.display = "none";
+        document.getElementById("chartShow").style.display = "";
+    }
+
+    //차트열기
+    function showChart(){
+        var rowIdx = sheet01.RowCount();
+        viewList.onLoadChart('chart01', cnt, maxDivLv, rowIdx, categories);
+        $('#unmark-legend-area').show();
+        document.getElementById("chart01").style.display = "";
+        document.getElementById("chartShow").style.display = "none";
+        document.getElementById("chartHide").style.display = "";
+    }
+
+    function goStyleView(){
+        $('#sStart').val(null);
+        $('#sEnd').val(null);
+        $('#frm').attr({action:'/portal/cate/statView.do', method:'get',target:'_self'}).submit();
+    }
+
+    function goStatView(){
+        $('#frm').attr({action:'/portal/cate/statView.do', method:'get',target:'_self'}).submit();
+    }
+
+    function goMetaView(){
+        $('#frm').attr({action:'/portal/cate/statMetaView.do', method:'get',target:'_self'}).submit();
+    }
+
+    function goPolicyView(){
+        $('#frm').attr({action:'/portal/cate/statPolicyView.do', method:'get',target:'_self'}).submit();
+    }
+
+    function goAnalsView(){
+        $('#frm').attr({action:'/portal/cate/statAnalsView.do', method:'get',target:'_self'}).submit();
+    }
+
+    window.addEventListener('scroll', function() {
+        fnSheetHeightAutoSize();
+        fnSheetWidthAutoSize();
+    });
+
+    $(window).ready(function() {
+        ib.initialize();
+        ib.reset();
+
+        $("#chartType").on("change", function(e){
+            //selectbox의 값으로 차트 타입을 변경한다.
+            chartObj.update({ chart: { type: e.currentTarget.value } });
+        });
+
+        // 파일다운 모달 오픈
+        $('#fileDownBtn').on('click', function() {
+            $('#file-download-modal').fadeIn('fast').css('display', 'flex');
+            $('body').addClass('no-scroll');
+        });
+
+        // 모달팝업 닫기
+        $(".mu-dialog-close-btn .mu-btn-close, .mu-dialog-foot .mu-btn").on("click", function() {
+            $(this).closest(".mu-modal").fadeOut("fast");
+            $("body").removeClass("no-scroll");
+        });
+
+        // 상세검색 열기 버튼
+        $(".btn-detail-view").on("click", function() {
+            if (!$(".search-form").hasClass("unfold")) {
+                $(".search-form").addClass("unfold");
+                $(".search-item-detail").slideDown("fast");
+                $(this).addClass("open");
+                $('.btn-detail-view > span').text('상세조회 닫기');
+            } else {
+                $(".search-form").removeClass("unfold");
+                $(".search-item-detail").slideUp("fast");
+                $(this).removeClass("open");
+                $('.btn-detail-view > span').text('상세조회 열기');
+            }
+        });
+
+        $('#pivotBtn').on('click', function() {
+            sheet01.ShowPivotDialog();
+        });
+
+        $('#sStart').on('change', function(){
+            if ( $('#sStart').val() > $('#sEnd').val() ) {
+                $('#sEnd').val($('#sStart').val());
+            }
+        })
+
+        $('#sEnd').on('change', function(){
+            if ( $('#sStart').val() > $('#sEnd').val() ) {
+                $('#sStart').val($('#sEnd').val());
+            }
+        })
+        hideChart();
+    });
+
+    var viewList = {};
+    var headerData = [];
+    var headerTxt = "";
+    var maxDivLv = 1;
+    var columnData = [];
+    var categories = [] ;
+    var count = 0; //좌측 고정 칼럼
+    var cnt = 0; // 우측 칼럼
+
+    var chartObj = null;
+
+    var ib = {
+        initialize: function() {
+            createIBSheet2(document.getElementById("dv_sheet01"), 'sheet01', '100%', '80%');
+        },
+        reset : function() {
+            sheet01.Reset();
+
+            // 기존 로딩이미지 제거
+            sheet01.SetSearchingImage('/');
+
+            var formId = 5557;
+            var styleNum = 1;
+
+            var param = {
+                formId: formId
+                , styleNum: styleNum
+            };
+
+            goAjaxGet('/portal/stat/columns.do', param, function(data) {
+                if (data.result == false) return;
+
+                cnt = 0;
+                count = 0;
+                columnData = [];
+
+                headerData = [];
+                columnData = [];
+                var headers = [];
+
+                var upDataDivIdMap = {};
+                $.each(data.data, function(i, o) {
+                    if (o.DIV_LV > maxDivLv) maxDivLv = o.DIV_LV;
+
+                    headerData.push(o.DATA_DIV_NM);
+
+                    headers.push({'Text':o.DATA_DIV_NM, 'Align': 'Center'});
+
+                    if (o.DATA_DIV == 'M') {
+                        var upDataDivId = Number(o.UP_DATA_DIV_ID);
+                        var upDataDivNm = '';
+                        if (upDataDivId > 0 && o.UP_DATA_DIV_ID in upDataDivIdMap) {
+                            upDataDivNm = upDataDivIdMap[o.UP_DATA_DIV_ID] + '|';
+                        }
+                        cnt ++;
+                        if ( $("#hPoint").val() == "00" ) {
+                            columnData.push({"Type":"Float", "MinWidth":100, "SaveName": (o.DATA_DIV_ID).toString(), Edit:0 , Format:"#,##0.#####", "AllowNull": 1, Header: upDataDivNm + o.DATA_DIV_NM, DataDiv:o.DATA_DIV});
+                        } else {
+                            columnData.push({"Type":"Float", "MinWidth":100, "SaveName": (o.DATA_DIV_ID).toString(), Edit:0 , Format:"#,##0.#####", "AllowNull": 1, Header: upDataDivNm + o.DATA_DIV_NM, DataDiv:o.DATA_DIV, PointCount:$("#hPoint").val()});
+                        }
+
+
+                    }
+                    else if (o.DATA_DIV == 'D') {
+                        columnData.push({"Type":"Text", "MinWidth": 50, "SaveName": (o.DATA_DIV_ID).toString(), Edit:0, Header: o.DATA_DIV_NM, DataDiv:o.DATA_DIV, BackColor: "#C9E1F5"});
+                        count ++;
+                    }
+                    else {
+                        var upDataDivId = Number(o.UP_DATA_DIV_ID);
+                        var upDataDivNm = '';
+                        if (upDataDivId > 0 && o.UP_DATA_DIV_ID in upDataDivIdMap) {
+                            upDataDivNm = upDataDivIdMap[o.UP_DATA_DIV_ID] + '|';
+                        }
+
+                        // upDataDivIdMap에 dataDivId가 존재하지 않는다면 key를 만든다.
+                        if (!(o.DATA_DIV_ID in upDataDivIdMap)) {
+                            upDataDivIdMap[o.DATA_DIV_ID] = upDataDivNm + '';
+                        }
+                        // upDataDivIdMap에 dataDivId가 존재하나, length가 0보다 크다면 |를 붙인다.
+                        else if (upDataDivIdMap[o.DATA_DIV_ID].length > 0) {
+                            upDataDivIdMap[o.DATA_DIV_ID] += '|';
+                        }
+
+                        // upDataDivIdMap에 dataDivNm을 덧붙인다.
+                        upDataDivIdMap[o.DATA_DIV_ID] += o.DATA_DIV_NM;
+                    }
+                });
+
+                if (maxDivLv > 1) {
+                    $.each(columnData, function(i, o) {
+                        if (o.DataDiv == 'D') {
+                            var columnName = o.Header;
+                            for (var i = 1; i < maxDivLv; i++) {
+                                o.Header += '|' + columnName;
+                            }
+                        }
+                    });
+                }
+
+                headerTxt = headerData.join('|');
+
+                var initData = {
+                    Cfg: {
+                        "SearchMode": 2
+                        , "Page" : 0
+                        , "PagingPosition" : 0
+                        , "SelectionSummary": "EmptyCell"
+                        , "FrozenCol": count
+                        , "UseHeaderActionMenu": false
+                        , "AutoFitColWidth":"init|resize|search|colresize"
+                        , "FitSizeColHeaderMode" : 1
+                        , "FitSizeColMode" : 0
+                        , "DeferredVScroll": 1
+                        , "DeferredHScroll": 1
+                        , "TouchScrolling" : 1
+                        , "MergeSheet": msHeaderOnly + msPrevColumnMerge
+                        , "PrevColumnMergeMode" : 0
+                    }
+                    , HeaderMode : {Sort:1, ColMove:0, ColResize:1,HeaderCheck:0}
+                    , "Cols": columnData
+                };
+
+                // IBSheet 초기화
+                IBS_InitSheet(sheet01, initData);
+
+                sheet01.SetCountPosition(3);
+                sheet01.SetSelectionSummaryInfoElement('');
+                sheet01.SetRowHeightMin(5);
+                sheet01.SetEditableColorDiff(0);
+                sheet01.SetSheetFontSize(14);
+                sheet01.SetSheetFontSize(13);
+                sheet01.SetDataRowHeight(20);
+
+                doSearch();
+            });
+        }
+    };
+
+    function doSearch() {
+        var url      = '/portal/stat/data.do';
+        var startDt = $('#sStart').val();
+        var endDt   = $('#sEnd').val();
+        var formId  = $('#sFormId > option:selected').val();
+
+        var queryStr = "formId=" + formId + "&styleNum=" + 1 + "&apprYn=Y&startDate=" + startDt + "&endDate=" + endDt;
+
+        $('#preLoading2').show();
+        goAjaxGet(url + "?" + queryStr, null, function(data) {
+            var result = data.result;
+            var msg    = data.msg;
+            if(result == false && msg) {
+                alert(msg);
+                $('#preLoading2').hide();
+                viewList.onLoadChart('chart01', cnt, maxDivLv, sheet01.RowCount(), categories);
+                return;
+            }
+
+            sheet01.LoadSearchData(data, { Sync: 1 });
+            viewList.onLoadChart('chart01', cnt, maxDivLv, sheet01.RowCount(), categories);
+        });
+    }
+
+    function toggleLegendOff() {
+        viewList.onLoadChart('chart01', cnt, maxDivLv, sheet01.RowCount(), categories);
+    }
+
+    // 페이지 이동시 스크롤 최상단으로 설정
+    var sheet01_OnMovePage = function() {
+        sheet01.SetScrollTop(0);
+    }
+
+    // 조회전 로딩이미지 표시
+    var sheet01_OnBeforeSearch = function() {
+        $('#preLoading2').show();
+    }
+
+    var sheet01_OnSearchEnd = function() {
+        var rowIdx = sheet01.RowCount();
+        if ( rowIdx >= 0 ) $('#preLoading2').hide();
+    }
+
+
+    viewList.onLoadChart = function(objId, dataColCount, startRowIdx, rowIdx, categoryColNm) {
+        $("#"+objId).empty();
+
+        Highcharts.setOptions({
+            lang: {
+                decimalPoint: '.',
+                thousandsSep: ','
+            }
+        });
+
+        var options ={
+            lang: {
+                thousandsSep: ',',
+                 numericSymbols: null
+            },
+            chart:{
+                type:$("#chartType").val(), // 차트의 타입 지정 추가
+                renderTo:objId,
+                events: {
+                    load() {
+                        const chart = this;
+                        let dataMax = chart.yAxis[0].dataMax;
+                        if ( dataMax != null && dataMax <= 0 ) {
+                            alertView("상단의 '관련파일' 탭에서 첨부파일을 참조하시기 바랍니다.");
+                        }
+                        $('#preLoading2').hide();
+                    },
+                    render: function(){
+                        $('#preLoading2').hide();
+                    }
+                }
+            },
+            boost: {
+                enabled: true,
+                allowForce: true,
+                useGPUTranslations: true
+            },
+            title:{
+                text : ""
+            },
+            navigation:{
+                buttonOptions:{
+                    enabled: false
+                }
+            },
+            credits: {
+                enabled: false
+            },
+            xAxis:[],
+            yAxis:[],
+            drilldown:[],
+            plotOptions:{
+                series: {
+                    borderWidth: 0,
+                    dataLabels: {
+                        enabled: true,
+                        format: '{point.y:.1f}',
+                    },
+                    events: {
+                        afterAnimate: function () {
+                            // 차트 변경시 마지막까지 다 그려졌으면 로딩바 숨김처리
+                            if (chartObj.series.filter((o, i) => o.type == chartObj.series[0].type).length == chartObj.series.length) {
+                                $('#preLoading2').hide();
+                            }
+                        }
+                    }
+                },
+            }, 
+            series: [], 
+            tooltip: {
+                headerFormat: '<span style="font-size:15px">{point.key}</span><table>',
+                pointFormat: '<tr><td style="padding:0 ; width: 200px; ">{series.name}: {point.y:.1f} </td>' +
+                '</tr>',
+                /* color:{series.color};  */
+            footerFormat: '</table>',
+            useHTML: true,
+            /* shared: true */ //한번에 모든 데이터볼 수 있음
+            }
+        };
+
+        if (objId == "chart01") {
+            categories = [];
+
+            if(rowIdx < startRowIdx){
+                var sb = '';
+                var chkExItems = true;
+                for(var k =0; k < rowIdx; k++){
+                    chkExItems = true;
+                    for(var j =0; j < count; j++){
+                        sb= sb + sheet01.GetCellValue(maxDivLv + k, j);
+                        if("Y" == dataFilterYn && isExcludeItems(sheet01.GetCellValue(maxDivLv + k, j))) {
+                            chkExItems = false;
+                        }
+                    }
+                    if(chkExItems) {
+                        categories.push(sb);
+                    }
+                }
+            }
+            else{
+                for(var i=startRowIdx; i <= rowIdx + startRowIdx - 1; i++ ){
+                    var sb = '';
+                    var chkExItems = true;
+                    for(var j =0; j < count; j++){
+                        sb= sb + sheet01.GetCellValue(i, j);
+                        if("Y" == dataFilterYn && isExcludeItems(sheet01.GetCellValue(i, j))) {
+                            chkExItems = false;
+                        }
+                    }
+                    if(chkExItems) {
+                        categories.push(sb);
+                    }
+                }
+
+            }
+            options.xAxis.push({categories: categories,lineWidth: 1, scrollbar: {enabled: true}});
+
+            var seriesAr = headerTxt.split("|");
+            var seriesNm = [] ;
+            seriesNm.push(columnData[0].Header);
+
+            for(var i =0; i < columnData.length; i++){
+                if(i > 0 ) {
+                    seriesNm.push(columnData[i].Header); // 그래프에 표시될 값 이름
+                }
+            }
+
+            var yObj = {};
+
+            options.yAxis.push({
+                gridLineWidth : 0,
+                tickPosition : "outside",
+                lineWidth : 1,
+                opposite : true,
+                endOnTick : false,
+                title : {
+                    text : ""
+                },
+                labels : {
+                    format : '{value:,.0f}',
+                }
+            });
+
+            //Chart 에 포함시키지 않을 라인 구하기
+            var excludeRows = [];
+            for(var i=1; i< columnData.length; i++){// 0번째는 무조건 시계열 데이터라서 1번째부터
+
+                var seriesObj = {};
+                var xValues = [];
+
+                if(columnData[i].DataDiv == "D"){
+                    for(var j=startRowIdx; j<= rowIdx + startRowIdx -1; j++){ //그래프에 들어갈 값
+                        if("Y" == dataFilterYn && isExcludeItems(sheet01.GetCellValue(j, i))) {
+                            excludeRows.push(j);   //스킵할 로우
+                        }
+                    }
+                }
+            }
+
+            for(var i=0; i< columnData.length; i++){
+
+                    var seriesObj = {};
+                    var xValues = [];
+                    var colNm = i;
+
+                    if(rowIdx < startRowIdx){
+                        for(var k =0; k < rowIdx; k++){
+                            if(!excludeRows.includes(startRowIdx + k)) {        //해당 row 가 제외시켜야 할 row 에 포함되지 않으면 chart 에 추가
+                                xValues.push(sheet01.GetCellValue(startRowIdx + k, colNm));
+                            }
+                        }
+                    }
+                    else{
+                        for(var j=startRowIdx; j<= rowIdx + startRowIdx -1; j++){ //그래프에 들어갈 값
+                            if(!excludeRows.includes(j)) {                        //해당 row 가 제외시켜야 할 row 에 포함되지 않으면 chart 에 추가
+                                xValues.push(sheet01.GetCellValue(j, colNm));
+                            }
+                        }
+                    }
+
+
+                    //범례표시
+                    if(columnData[i].DataDiv !="D"){
+                        if ("Y" == colFilterYn) {
+                            if ( !isExcludeItems(seriesNm[i]) ) {
+                                seriesObj.name = seriesNm[i];
+                                seriesObj.data = xValues;
+                                if(i == 0) seriesObj.yAxis = 1;
+                                else seriesObj.yAxis = 0;
+                                seriesObj.dashStyle = "Solid";
+                                seriesObj.showInLegend = document.getElementById("ckb1").checked;
+
+                                options.series.push(seriesObj);
+                            }
+                        } else {
+                            seriesObj.name = seriesNm[i];
+                            seriesObj.data = xValues;
+                            if(i == 0) seriesObj.yAxis = 1;
+                            else seriesObj.yAxis = 0;
+                            seriesObj.dashStyle = "Solid";
+                            seriesObj.showInLegend = document.getElementById("ckb1").checked;
+
+                            options.series.push(seriesObj);
+                        }
+                    }
+                //}
+            }
+
+            chartObj = new Highcharts.Chart(options);
+        }
+    };
+
+    function alertView(text){
+        $('#alertText').text(text);
+        $('#alertView').show();
+    }
+
+    //str 이 제외시킬 문자에 포함되었으면 true, 포함되지 않았으면 false
+    function isExcludeItems(str) {
+
+        str = str.split(' ').join('');                                // 공백제거
+
+        var chartExcludeItems = ["소계","누계","합계","총계", "전국", "총합", "총합계", "계(Total)", "전체"];      // like
+        var chartExcludeItems2 = ["계"];                                // 일치
+
+        var strArr = str.split('|');
+
+        if (strArr && strArr.length > 1) {
+
+            for(var k=0; k < strArr.length; k++) {
+                str = strArr[k];
+
+                for(var i=0; i < chartExcludeItems2.length; i++){
+                    if(str == chartExcludeItems2[i]) {
+                        return true;
+                    }
+                }
+                for(var i=0; i < chartExcludeItems.length; i++){
+                    if(str.indexOf(chartExcludeItems[i]) >= 0) {
+                        return true;
+                    }
+                }
+            }
+        } else {
+            for(var i=0; i < chartExcludeItems2.length; i++){
+                if(str == chartExcludeItems2[i]) {
+                    return true;
+                }
+            }
+            for(var i=0; i < chartExcludeItems.length; i++){
+                if(str.indexOf(chartExcludeItems[i]) >= 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+</script>
+<style>
+.search-wrap .mu-tab li {
+    margin: 0;
+    border: none;
+    width: calc(100%/4);
+}
+
+input{
+    -webkit-appearance: checkbox!important;
+}
+#chartType {
+    display: block !important;
+    visibility: visible !important;
+}
+</style>
+</head>    
+<body > 
+<form id="frm" name="frm" method="get">
+    <input type="hidden" id="hRsId"     name="hRsId"     value="488"/>
+    <input type="hidden" id="hFormId"   name="hFormId"   value="5557"/>
+    <input type="hidden" id="hSelectId" name="hSelectId" value="5557"/>
+    <input type="hidden" id="hPoint"    name="hPoint"    value="00"/>
+    <input type="hidden" id="hAppr"     name="hAppr"     value="1"/>
+    <input type="hidden" id="hDivEng"   name="hDivEng"   value=""/>
+    <input type="hidden" id='oFileName' name='oFileName' value='' />
+    <input type="hidden" id='rFileName' name='rFileName' value='' />
+    <input type="hidden" id='midpath'   name='midpath'   value='' />
+
+    <div class="wrap">
+
+        <!-- skip -->
+        <div class="skiptoContent">
+            <a href="#main">본문 바로가기</a>
+        </div>
+        <!-- //skip -->
+
+        <!-- header -->
+        <header class="header">
+            <h1 class="logo">
+                <a href="/portal/main/portalMain.do" target="_self"><span>국토교통 통계누리</span></a> <span
+                    class="header-title">통계표 보기</span>
+            </h1>
+            <div class="close-window">
+                <button type="button" class="mu-btn mu-btn-close" onclick="window.close();">
+                    <i class="mu-icon-svg close"></i> <span>통계표 닫기</span>
+                </button>
+            </div>
+        </header>
+        <!-- //header -->
+
+        <!-- container -->
+        <main id="main" class="main-sub">
+            <div class="container">
+                <div class="subject-wrap">
+                    <div class="subject">
+                        <h2 class="subject-title">
+                            주택건설실적통계(분양)
+                            
+                            <i class="mu-icon-svg mark"></i>
+                            
+                        </h2>
+                    </div>
+                </div>
+                <div class="search-wrap">
+                    <div class="mu-tab-box">
+                        <ul class="mu-tab">
+                            <li class="active"><a href="">통계표 보기</a></li>
+                            <li><a href="javascript:goMetaView();">통계정보</a></li>
+                            <li><a href="javascript:goAnalsView();">관련용어</a></li>
+                            <li><a href="javascript:goPolicyView();">정책정보</a></li>
+                        </ul>
+                    </div>
+                    <div class="search-form unfold">
+                        <div class="search-item-group">
+                            <div class="search-form-item">
+                                <strong class="search-item-label">검색분야</strong>
+                                <div class="mu-input-plaintext">주택/주택건설실적통계(분양)</div>
+                            </div>
+                            <div class="search-form-item">
+                                <strong class="search-item-label">통계표명</strong>
+                                <div class="mu-item-group">
+                                    <div class="mu-selectbox">
+                                         <select class="form-control" id='sFormId' name='sFormId' style='display: inline-block;' title='통계표명' onchange="null" ><option value='5557'  selected>주택건설 분양실적(공동주택) (201301 ~ 202603)</option></select>
+                                    </div>
+                                    <button type="button" class="mu-btn mu-btn-secondary" onclick="goformView()">
+                                        <span>조회</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="search-detail-action">
+                            <button type="button" class="mu-btn mu-btn-bg-non btn-detail-view open">
+                                <span>상세조회 닫기</span> <i class="mu-icon-svg arrow-down"></i>
+                            </button>
+                        </div>
+                        <!-- 상세조회 -->
+                        <div class="search-item-detail" style="display:block;">
+                            <div class="search-item-group">
+                                <div class="search-form-item">
+                                    <strong class="search-item-label">기간선택(년)</strong>
+                                    <div class="mu-item-group">
+                                    <div class="prov-group">
+                                        <div>
+                                            <div class="period-set">
+                                                <div class="mu-selectbox">
+                                                     <select class="form-control" id='sStart' name='sStart' style='display: inline-block;' title='시작기간' onchange="" ><option value='202603' >202603</option><option value='202602' >202602</option><option value='202601' >202601</option><option value='202512' >202512</option><option value='202511' >202511</option><option value='202510' >202510</option><option value='202509' >202509</option><option value='202508' >202508</option><option value='202507' >202507</option><option value='202506' >202506</option><option value='202505' >202505</option><option value='202504' >202504</option><option value='202503' >202503</option><option value='202502' >202502</option><option value='202501' >202501</option><option value='202412' >202412</option><option value='202411' >202411</option><option value='202410' >202410</option><option value='202409' >202409</option><option value='202408' >202408</option><option value='202407' >202407</option><option value='202406'  selected>202406</option><option value='202405' >202405</option><option value='202404' >202404</option><option value='202403' >202403</option><option value='202402' >202402</option><option value='202401' >202401</option><option value='202312' >202312</option><option value='202311' >202311</option><option value='202310' >202310</option><option value='202309' >202309</option><option value='202308' >202308</option><option value='202307' >202307</option><option value='202306' >202306</option><option value='202305' >202305</option><option value='202304' >202304</option><option value='202303' >202303</option><option value='202302' >202302</option><option value='202301' >202301</option><option value='202212' >202212</option><option value='202211' >202211</option><option value='202210' >202210</option><option value='202209' >202209</option><option value='202208' >202208</option><option value='202207' >202207</option><option value='202206' >202206</option><option value='202205' >202205</option><option value='202204' >202204</option><option value='202203' >202203</option><option value='202202' >202202</option><option value='202201' >202201</option><option value='202112' >202112</option><option value='202111' >202111</option><option value='202110' >202110</option><option value='202109' >202109</option><option value='202108' >202108</option><option value='202107' >202107</option><option value='202106' >202106</option><option value='202105' >202105</option><option value='202104' >202104</option><option value='202103' >202103</option><option value='202102' >202102</option><option value='202101' >202101</option><option value='202012' >202012</option><option value='202011' >202011</option><option value='202010' >202010</option><option value='202009' >202009</option><option value='202008' >202008</option><option value='202007' >202007</option><option value='202006' >202006</option><option value='202005' >202005</option><option value='202004' >202004</option><option value='202003' >202003</option><option value='202002' >202002</option><option value='202001' >202001</option><option value='201912' >201912</option><option value='201911' >201911</option><option value='201910' >201910</option><option value='201909' >201909</option><option value='201908' >201908</option><option value='201907' >201907</option><option value='201906' >201906</option><option value='201905' >201905</option><option value='201904' >201904</option><option value='201903' >201903</option><option value='201902' >201902</option><option value='201901' >201901</option><option value='201812' >201812</option><option value='201811' >201811</option><option value='201810' >201810</option><option value='201809' >201809</option><option value='201808' >201808</option><option value='201807' >201807</option><option value='201806' >201806</option><option value='201805' >201805</option><option value='201804' >201804</option><option value='201803' >201803</option><option value='201802' >201802</option><option value='201801' >201801</option><option value='201712' >201712</option><option value='201711' >201711</option><option value='201710' >201710</option><option value='201709' >201709</option><option value='201708' >201708</option><option value='201707' >201707</option><option value='201706' >201706</option><option value='201705' >201705</option><option value='201704' >201704</option><option value='201703' >201703</option><option value='201702' >201702</option><option value='201701' >201701</option><option value='201612' >201612</option><option value='201611' >201611</option><option value='201610' >201610</option><option value='201609' >201609</option><option value='201608' >201608</option><option value='201607' >201607</option><option value='201606' >201606</option><option value='201605' >201605</option><option value='201604' >201604</option><option value='201603' >201603</option><option value='201602' >201602</option><option value='201601' >201601</option><option value='201512' >201512</option><option value='201511' >201511</option><option value='201510' >201510</option><option value='201509' >201509</option><option value='201508' >201508</option><option value='201507' >201507</option><option value='201506' >201506</option><option value='201505' >201505</option><option value='201504' >201504</option><option value='201503' >201503</option><option value='201502' >201502</option><option value='201501' >201501</option><option value='201412' >201412</option><option value='201411' >201411</option><option value='201410' >201410</option><option value='201409' >201409</option><option value='201408' >201408</option><option value='201407' >201407</option><option value='201406' >201406</option><option value='201405' >201405</option><option value='201404' >201404</option><option value='201403' >201403</option><option value='201402' >201402</option><option value='201401' >201401</option><option value='201312' >201312</option><option value='201311' >201311</option><option value='201310' >201310</option><option value='201309' >201309</option><option value='201308' >201308</option><option value='201307' >201307</option><option value='201306' >201306</option><option value='201305' >201305</option><option value='201304' >201304</option><option value='201303' >201303</option><option value='201302' >201302</option><option value='201301' >201301</option></select>
+                                                </div>
+                                                <span>~</span>
+                                                <div class="mu-selectbox">
+                                                         <select class="form-control" id='sEnd' name='sEnd' style='display: inline-block;' title='마지막기간' onchange="" ><option value='202603' >202603</option><option value='202602' >202602</option><option value='202601' >202601</option><option value='202512' >202512</option><option value='202511' >202511</option><option value='202510' >202510</option><option value='202509' >202509</option><option value='202508' >202508</option><option value='202507' >202507</option><option value='202506' >202506</option><option value='202505' >202505</option><option value='202504' >202504</option><option value='202503' >202503</option><option value='202502' >202502</option><option value='202501' >202501</option><option value='202412' >202412</option><option value='202411' >202411</option><option value='202410' >202410</option><option value='202409' >202409</option><option value='202408' >202408</option><option value='202407' >202407</option><option value='202406'  selected>202406</option><option value='202405' >202405</option><option value='202404' >202404</option><option value='202403' >202403</option><option value='202402' >202402</option><option value='202401' >202401</option><option value='202312' >202312</option><option value='202311' >202311</option><option value='202310' >202310</option><option value='202309' >202309</option><option value='202308' >202308</option><option value='202307' >202307</option><option value='202306' >202306</option><option value='202305' >202305</option><option value='202304' >202304</option><option value='202303' >202303</option><option value='202302' >202302</option><option value='202301' >202301</option><option value='202212' >202212</option><option value='202211' >202211</option><option value='202210' >202210</option><option value='202209' >202209</option><option value='202208' >202208</option><option value='202207' >202207</option><option value='202206' >202206</option><option value='202205' >202205</option><option value='202204' >202204</option><option value='202203' >202203</option><option value='202202' >202202</option><option value='202201' >202201</option><option value='202112' >202112</option><option value='202111' >202111</option><option value='202110' >202110</option><option value='202109' >202109</option><option value='202108' >202108</option><option value='202107' >202107</option><option value='202106' >202106</option><option value='202105' >202105</option><option value='202104' >202104</option><option value='202103' >202103</option><option value='202102' >202102</option><option value='202101' >202101</option><option value='202012' >202012</option><option value='202011' >202011</option><option value='202010' >202010</option><option value='202009' >202009</option><option value='202008' >202008</option><option value='202007' >202007</option><option value='202006' >202006</option><option value='202005' >202005</option><option value='202004' >202004</option><option value='202003' >202003</option><option value='202002' >202002</option><option value='202001' >202001</option><option value='201912' >201912</option><option value='201911' >201911</option><option value='201910' >201910</option><option value='201909' >201909</option><option value='201908' >201908</option><option value='201907' >201907</option><option value='201906' >201906</option><option value='201905' >201905</option><option value='201904' >201904</option><option value='201903' >201903</option><option value='201902' >201902</option><option value='201901' >201901</option><option value='201812' >201812</option><option value='201811' >201811</option><option value='201810' >201810</option><option value='201809' >201809</option><option value='201808' >201808</option><option value='201807' >201807</option><option value='201806' >201806</option><option value='201805' >201805</option><option value='201804' >201804</option><option value='201803' >201803</option><option value='201802' >201802</option><option value='201801' >201801</option><option value='201712' >201712</option><option value='201711' >201711</option><option value='201710' >201710</option><option value='201709' >201709</option><option value='201708' >201708</option><option value='201707' >201707</option><option value='201706' >201706</option><option value='201705' >201705</option><option value='201704' >201704</option><option value='201703' >201703</option><option value='201702' >201702</option><option value='201701' >201701</option><option value='201612' >201612</option><option value='201611' >201611</option><option value='201610' >201610</option><option value='201609' >201609</option><option value='201608' >201608</option><option value='201607' >201607</option><option value='201606' >201606</option><option value='201605' >201605</option><option value='201604' >201604</option><option value='201603' >201603</option><option value='201602' >201602</option><option value='201601' >201601</option><option value='201512' >201512</option><option value='201511' >201511</option><option value='201510' >201510</option><option value='201509' >201509</option><option value='201508' >201508</option><option value='201507' >201507</option><option value='201506' >201506</option><option value='201505' >201505</option><option value='201504' >201504</option><option value='201503' >201503</option><option value='201502' >201502</option><option value='201501' >201501</option><option value='201412' >201412</option><option value='201411' >201411</option><option value='201410' >201410</option><option value='201409' >201409</option><option value='201408' >201408</option><option value='201407' >201407</option><option value='201406' >201406</option><option value='201405' >201405</option><option value='201404' >201404</option><option value='201403' >201403</option><option value='201402' >201402</option><option value='201401' >201401</option><option value='201312' >201312</option><option value='201311' >201311</option><option value='201310' >201310</option><option value='201309' >201309</option><option value='201308' >201308</option><option value='201307' >201307</option><option value='201306' >201306</option><option value='201305' >201305</option><option value='201304' >201304</option><option value='201303' >201303</option><option value='201302' >201302</option><option value='201301' >201301</option></select>
+                                                </div>
+                                            </div>
+                                            <button type="button" class="mu-btn mu-btn-secondary" onclick="goAjax();" value="검색">
+                                                <span>조회</span>
+                                            </button>
+                                        </div>
+                                        </div>
+                                    </div>
+
+                                </div>
+                                <div class="search-form-item">
+                                    <strong class="search-item-label">양식선택</strong>
+                                    <div class="mu-selectbox">
+                                         <select class="form-control" id='sStyleNum' name='sStyleNum' style='width: 100%; height: 100%; display: inline-block; max-width: 126px;' title='양식선택' onchange="goStyleView()" ><option value='1'  selected>양식1</option></select>
+                                    </div>
+
+                                </div>
+                            </div>
+                        </div>
+                            
+                        <!-- //상세조회 -->
+                    </div>
+                </div>
+                <div class="contents-wrap">
+                    <!-- contents -->
+                    <div class="contents">
+                        <div class="chart-wrap">
+                            <!-- 통계표 영역 -->
+                            <div class="search-toolbar">
+                                <div class="search-toolbar-item">
+                                    <strong class="search-item-label">차트선택</strong>
+                                    <div class="mu-item-group">
+                                        <div class="mu-selectbox">
+                                            <select name="" id="chartType" class="mu-select">
+                                                <option value="column">막대그래프</option>
+                                                <option value="line">꺾은선그래프</option>
+                                                <option value="spline">곡선그래프</option>
+                                                <option value="area">영역그래프</option>
+                                            </select>
+                                        </div>
+                                        <button id= "chartHide" type="button" class="mu-btn mu-btn-secondary" onclick="hideChart()">
+                                            <span>차트닫기</span>
+                                        </button>
+                                        <button id= "chartShow" style="display:none" type="button" class="mu-btn mu-btn-secondary" onclick="showChart()">
+                                            <span>차트보기</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="search-toolbar-item">
+                                    <p> 단위 : 호  </p>
+                                    <div class="button-group">
+                                        <button type="button" title="파일 다운로드" id="fileDownBtn" class="mu-btn btn-download">
+                                            <i class="mu-icon-svg download"></i> <span>파일 다운로드</span>
+                                        </button>
+                                        <button type="button" title="피벗 설정" id="pivotBtn" class="mu-btn pc-only">
+                                            <span>피벗 설정</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mu-checkbox" id="unmark-legend-area" style="margin-left: 20px;">
+                                <input type="checkbox" id="ckb1" checked="checked" onclick="toggleLegendOff()">
+                                <label for="ckb1"><span>범례표시 해제</span></label>
+                            </div>
+                            <!-- 그래프 영역(Highcharts) -->
+                            <div class="sheet-frame">
+                                <div class="sheet-frame-legend">
+                                </div>
+                                <div id="chart01" >
+                                </div>
+                            </div>
+                            <!-- 통계표 영역 -->
+                            <div class="sheet-frame" style=" height: 760px;">
+                                    <div id="dv_sheet01" ></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- //contents -->
+                    <div class="notice-wrap" style="justify-content: space-between;">
+                        <p>
+                            * 시계열뒤 p) 표기는 데이터 확정전 잠정치를 표기합니다.
+                        </p>
+                        <p class="bul-refer">
+                            승인통계는 <i class="mu-icon-svg mark"></i> 로 표시됩니다.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </main>
+        <!-- //container -->
+
+        <!-- footer -->
+        <footer class="footer">
+            <div class="footer-logo">
+                <span>국토교통부</span>
+            </div>
+
+            <p class="copyright">Copyright (c) 2022 Ministry of Land,
+                Infrastructure and Transport. All Rights Reserved.</p>
+            <a href="/portal/info/protect.do" class="footer-link">저작권보호정책</a>
+        </footer>
+        <!-- //footer -->
+
+        <!-- modal : 파일 다운로드 모달 -->
+        <div class="mu-modal" id="file-download-modal" style="display: none;">
+            <div class="mu-dialog-background"></div>
+            <div class="mu-dialog">
+                <div class="mu-dialog-head">
+                    <p class="title">파일 다운로드</p>
+                </div>
+                <div class="mu-dialog-body">
+                    <ul class="mu-check-list horizontal">
+                        <li>
+                            <div class="mu-radio">
+                                <input type="radio" id="check01" name="settingRadio" value="xlsx" checked>
+                                <label for="check01">
+                                    <img src="/portal/resources/images/ico/ico-file-excel.svg" alt="EXCEL file">
+                                    <span>EXCEL</span>
+                                </label>
+                            </div>
+                        </li>
+                        <li>
+                            <div class="mu-radio">
+                                <input type="radio" id="check02" name="settingRadio" value="csv">
+                                <label for="check02">
+                                    <img src="/portal/resources/images/ico/ico-file-csv.svg" alt="CSV file">
+                                    <span>CSV</span>
+                                </label>
+                            </div>
+                        </li>
+                        <li>
+                            <div class="mu-radio">
+                                <input type="radio" id="check03" name="settingRadio" value="txt">
+                                <label for="check03">
+                                    <img src= "/portal/resources/images/ico/ico-file-txt.svg" alt="TXT file">
+                                    <span>TXT</span>
+                                </label>
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+                <div class="mu-dialog-foot">
+                    <button type="button" class="mu-btn mu-btn-primary" onclick="download()">
+                        <span>다운로드</span>
+                    </button>
+                </div>
+                <!-- 접근성 : 내용을 읽고 나서 닫기 나중으로 빼준다  -->
+                <div class="mu-dialog-close-btn">
+                    <button type="button" class="mu-btn mu-btn-close" title="해당 팝업 닫기">
+                        <i class="mu-icon-svg close"></i>
+                        <span>팝업닫기</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <!-- //modal -->
+
+    </div>
+
+</form>
+</body>
+
+</html>

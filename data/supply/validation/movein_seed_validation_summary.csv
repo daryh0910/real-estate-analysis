@@ -1,0 +1,6 @@
+﻿source,validation_status,rows
+lh_public_completion,ok,351
+local_construction,ok,50
+local_construction,warn,3
+reb_movein_plan,ok,673
+reb_movein_plan,warn,2

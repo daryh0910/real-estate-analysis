@@ -11,14 +11,19 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from buy_decision.schemas import PURPOSES
+from buy_decision.view_model import build_buy_decision_view_model
 from data_loader import load_all_data, load_apt_data, load_rent_data, get_sigungu_name
 from board import (
     init_db,
     delete_saved_chart,
+    get_shared_chart,
     list_saved_charts,
     list_watchlists,
+    revoke_shared_chart,
     save_chart_settings,
     save_condition_set,
+    share_saved_chart,
     upsert_watchlist,
 )
 from analysis import (
@@ -90,6 +95,8 @@ INDICATOR_CATALOG = [
     {"group": "공급", "column": "인허가_호수", "label": "아파트 인허가", "source": "통계청/국토부", "unit": "호", "best_for": "향후 공급 선행", "caution": "입주까지 시차 존재"},
     {"group": "공급", "column": "착공_호수", "label": "착공 호수", "source": "KOSIS/국토부", "unit": "호", "best_for": "실제 공급 진행", "caution": "준공 전 지연 가능"},
     {"group": "공급", "column": "준공_호수", "label": "준공 호수", "source": "KOSIS/국토부", "unit": "호", "best_for": "입주 공급 확인", "caution": "지역별 집계 기준 확인 필요"},
+    {"group": "공급", "column": "입주예정_세대수", "label": "입주예정 세대수", "source": "REB/입주예정", "unit": "호", "best_for": "향후 실제 입주 물량 확인", "caution": "예정 물량이라 지연·변경 가능"},
+    {"group": "공급", "column": "입주예정_단지수", "label": "입주예정 단지수", "source": "REB/입주예정", "unit": "개", "best_for": "공급 집중도 확인", "caution": "단지 규모 차이는 세대수와 함께 봐야 함"},
     {"group": "공급", "column": "미분양_호수", "label": "미분양 호수", "source": "BOK/국토부", "unit": "호", "best_for": "공급 부담", "caution": "공표 지연 가능"},
     {"group": "공급", "column": "미분양소화기간", "label": "미분양 소화기간", "source": "파생", "unit": "개월", "best_for": "미분양 부담을 거래속도로 환산", "caution": "거래량 급감 시 급등 가능"},
     # 심리/금리
@@ -143,6 +150,9 @@ yearly_df = data.get("yearly", pd.DataFrame())
 monthly_df = data.get("monthly", pd.DataFrame())
 policy_events_df = data.get("policy_events", pd.DataFrame())
 quintile_df = data.get("quintile", pd.DataFrame())
+movein_plan_df = data.get("movein_plan", pd.DataFrame())
+movein_sigungu_monthly_df = data.get("movein_sigungu_monthly", pd.DataFrame())
+movein_sido_monthly_df = data.get("movein_sido_monthly", pd.DataFrame())
 
 # --- 사이드바 필터 ---
 st.sidebar.title("필터 설정")
@@ -223,7 +233,8 @@ if analysis_mode == "매매 분석":
     for col in ["NPS_가입자수", "NPS_1인당고지금액", "NPS_사업장수", "NPS_고용증감",
                 "주담대_잔액", "주담대_증감률", "주담대_비중",
                 "가구_자산평균", "가구_부채평균", "가구_순자산", "가구_소득평균", "DSR",
-                "미분양_평균", "미분양_호수", "전월세전환율", "지가변동률",
+                "미분양_평균", "미분양_호수", "입주예정_세대수", "입주예정_단지수",
+                "전월세전환율", "지가변동률",
                 "기준금리", "CD_91일", "국고채_3년", "국고채_5년", "국고채_10년",
                 "아파트매매가격지수", "아파트전세가격지수"]:
         if col in yearly_df.columns:
@@ -249,7 +260,8 @@ else:
                 "NPS_가입자수", "NPS_1인당고지금액", "NPS_사업장수", "NPS_고용증감",
                 "주담대_잔액", "주담대_증감률", "주담대_비중",
                 "가구_자산평균", "가구_부채평균", "가구_순자산", "가구_소득평균", "DSR",
-                "미분양_평균", "미분양_호수", "전월세전환율", "지가변동률",
+                "미분양_평균", "미분양_호수", "입주예정_세대수", "입주예정_단지수",
+                "전월세전환율", "지가변동률",
                 "기준금리", "CD_91일", "국고채_3년", "국고채_5년", "국고채_10년",
                 "아파트매매가격지수", "아파트전세가격지수"]:
         if col in yearly_df.columns:
@@ -387,8 +399,8 @@ def _compute_formulas(
 
 
 # --- 페이지 구성 ---
-overview_tab, demand_supply_tab, transaction_tab, listing_tab, valuation_tab = st.tabs([
-    "Overview", "수요공급분석", "거래현황", "매물찾기", "자유차트"
+overview_tab, buy_decision_tab, demand_supply_tab, transaction_tab, listing_tab, valuation_tab = st.tabs([
+    "Overview", "매수판단", "수요공급분석", "거래현황", "매물현황", "자유차트"
 ])
 
 # 기존 11개 화면 블록을 5개 상위 탭으로 재배치한다.
@@ -404,6 +416,212 @@ main_tab9 = valuation_tab
 main_tab10 = listing_tab
 main_tab11 = listing_tab
 
+TAB_USAGE_GUIDES = {
+    "Overview": {
+        "purpose": "선택 지역의 가격·거래·전세·수요·공급 상태를 한 화면에서 빠르게 훑어봅니다.",
+        "steps": [
+            "왼쪽 필터에서 시도/시군구, 기간, 분석 단위를 먼저 정합니다.",
+            "핵심 KPI와 저평가·고평가 순위를 보고 관심 지역을 좁힙니다.",
+            "데이터 출처 및 최신성 표에서 지표별 기준 시점과 결측률을 확인합니다.",
+        ],
+        "example": "예: 서울 → 강남구·송파구 선택 후 Overview에서 밸류스코어와 거래량 변화를 먼저 확인합니다.",
+    },
+    "매수판단": {
+        "purpose": "두 지역을 목적별 가중치로 비교해 어느 쪽을 더 깊게 볼지 판단합니다.",
+        "steps": [
+            "지역 A와 지역 B를 고릅니다.",
+            "목적을 실거주/전세끼고 매수/투자 중 하나로 선택합니다.",
+            "종합 판단, 축별 비교표, 2x2 차트를 함께 보고 강점·주의축을 확인합니다.",
+        ],
+        "example": "예: 지역 A=종로구, 지역 B=동작구, 목적=전세끼고 매수로 놓고 전세지지력과 입주물량 부담을 비교합니다.",
+    },
+    "수요공급분석": {
+        "purpose": "수요·공급 균형, 입주물량, 인허가/착공/준공, 미분양 흐름을 확인합니다.",
+        "steps": [
+            "관심 지역과 기간을 선택합니다.",
+            "수요-공급 분석기에서 가격 국면과 수요·공급 지표의 방향을 확인합니다.",
+            "입주물량/인허가/미분양 세부 탭에서 공급 부담이 언제 집중되는지 봅니다.",
+        ],
+        "example": "예: 경기 화성시를 선택하고 2026년 입주예정 세대수와 미분양 흐름을 함께 확인합니다.",
+    },
+    "거래현황": {
+        "purpose": "거래량, 평균가격, 갭, 지역 순위 등 실제 거래 기반 시장 활력을 봅니다.",
+        "steps": [
+            "매매/전세/월세 모드와 기간을 선택합니다.",
+            "거래현황에서 최근 거래량과 가격 흐름을 확인합니다.",
+            "시계열 비교, 가격비교, 갭분석, 지역순위로 관심 지역을 서로 비교합니다.",
+        ],
+        "example": "예: 서울 주요 구를 선택하고 거래량이 회복되는 지역을 지역순위에서 찾은 뒤 가격비교 탭에서 추세를 확인합니다.",
+    },
+    "매물현황": {
+        "purpose": "업로드한 매물 데이터를 기준으로 호가, 매물 수, 단지별 집중도를 확인합니다.",
+        "steps": [
+            "네이버 등에서 정리한 매물 파일을 업로드하거나 기존 세션 데이터를 사용합니다.",
+            "지역/거래유형/가격 범위 필터를 조정합니다.",
+            "KPI, 호가 분포, 단지별 매물현황을 보고 원천 표는 펼쳐서 검토합니다.",
+        ],
+        "example": "예: 성동구 아파트 매물 CSV를 올리고 매매만 필터링해 단지별 최저 호가와 매물 집중도를 확인합니다.",
+    },
+    "자유차트": {
+        "purpose": "여러 지역·지표를 자유롭게 겹쳐 보고, 조건식/전략검증/통계검증으로 가설을 점검합니다.",
+        "steps": [
+            "지역, 지표, 표시 방식(원값/Index=100/변화율 등)을 선택합니다.",
+            "슈퍼차트와 전략검증에서 원하는 조건을 만들어 과거 반복성을 봅니다.",
+            "통계검증, 회귀분석, 상관관계, 선행 신호로 가설의 신뢰도를 점검합니다.",
+        ],
+        "example": "예: 서울과 경기의 아파트매매가격지수·금리·입주예정 세대수를 Index=100으로 겹쳐 선행 신호를 확인합니다.",
+    },
+}
+
+
+def render_tab_usage_guide(tab_name):
+    guide = TAB_USAGE_GUIDES.get(tab_name)
+    if not guide:
+        return
+    with st.expander(f"처음 보는 분을 위한 사용법: {tab_name}", expanded=False):
+        st.markdown(f"**무엇을 보는 탭인가요?** {guide['purpose']}")
+        st.markdown("**사용 순서**")
+        for idx, step in enumerate(guide["steps"], start=1):
+            st.write(f"{idx}. {step}")
+        st.markdown(f"**예시** {guide['example']}")
+
+
+# Tab: 매수판단
+with buy_decision_tab:
+    st.header("어디를 살까?")
+    st.caption("과거 및 현재 데이터 기준으로 두 지역을 비교하는 참고 화면입니다.")
+    render_tab_usage_guide("매수판단")
+
+    buy_decision_source_df = filtered_monthly if not filtered_monthly.empty else filtered_yearly
+    buy_region_col = next((col for col in ["지역코드", "시군구", "지역", "시도"] if col in buy_decision_source_df.columns), None)
+
+    if buy_decision_source_df.empty or buy_region_col is None:
+        st.info("매수판단에 사용할 지역 데이터가 부족합니다. 필터 또는 데이터 적재 상태를 확인하세요.")
+        with st.expander("데이터 품질/주의사항", expanded=True):
+            st.write("필수 데이터가 부족해 비교 화면을 표시하지 못했습니다.")
+            st.write("본 화면은 과거 및 현재 데이터 기반의 비교 참고 자료이며, 투자 판단을 대신하지 않습니다.")
+    else:
+        buy_region_options = sorted(buy_decision_source_df[buy_region_col].dropna().astype(str).unique())
+
+        def _buy_region_label(region_value):
+            region_rows = buy_decision_source_df[buy_decision_source_df[buy_region_col].astype(str) == str(region_value)]
+            if "시군구" in region_rows.columns and not region_rows["시군구"].dropna().empty:
+                return str(region_rows["시군구"].dropna().iloc[0])
+            if "지역" in region_rows.columns and not region_rows["지역"].dropna().empty:
+                return str(region_rows["지역"].dropna().iloc[0])
+            if "시도" in region_rows.columns and not region_rows["시도"].dropna().empty:
+                return str(region_rows["시도"].dropna().iloc[0])
+            if buy_region_col == "지역코드":
+                return f"{get_sigungu_name(region_value)} ({region_value})"
+            return str(region_value)
+
+        if len(buy_region_options) < 2:
+            st.info("비교하려면 최소 2개 지역 데이터가 필요합니다.")
+            with st.expander("데이터 품질/주의사항", expanded=True):
+                st.write("선택 가능한 지역이 2개 미만입니다.")
+                st.write("본 화면은 과거 및 현재 데이터 기반의 비교 참고 자료이며, 투자 판단을 대신하지 않습니다.")
+        else:
+            input_cols = st.columns([1, 1, 1])
+            with input_cols[0]:
+                buy_region_a = st.selectbox("지역 A", buy_region_options, format_func=_buy_region_label, key="buy_decision_region_a")
+            with input_cols[1]:
+                default_b_index = 1 if len(buy_region_options) > 1 else 0
+                buy_region_b = st.selectbox("지역 B", buy_region_options, index=default_b_index, format_func=_buy_region_label, key="buy_decision_region_b")
+            with input_cols[2]:
+                buy_purpose = st.radio("목적", PURPOSES, horizontal=True, key="buy_decision_purpose")
+
+            try:
+                buy_vm = build_buy_decision_view_model(buy_decision_source_df, buy_region_a, buy_region_b, buy_purpose)
+            except Exception as exc:
+                buy_vm = None
+                st.warning(f"매수판단 화면을 구성하는 중 문제가 발생했습니다: {exc}")
+
+            if buy_vm:
+                summary_card = buy_vm.get("summary_card", {})
+                st.subheader("종합 판단")
+                headline_cols = st.columns([2, 1])
+                with headline_cols[0]:
+                    st.info(summary_card.get("headline") or summary_card.get("summary", "비교 참고 데이터를 확인하세요."))
+                with headline_cols[1]:
+                    st.metric("데이터 품질", summary_card.get("data_quality_label", "부분 확인 필요"))
+                st.write(summary_card.get("summary", "비교 참고 데이터를 확인하세요."))
+                st.caption(summary_card.get("caution", "본 화면은 과거 및 현재 데이터 기반의 비교 참고 자료입니다."))
+
+                reason_cols = st.columns(2)
+                with reason_cols[0]:
+                    st.markdown("**핵심 근거**")
+                    for reason in summary_card.get("reasons", []) or ["종합 점수와 축별 점수를 함께 확인하세요."]:
+                        st.write(f"- {reason}")
+                with reason_cols[1]:
+                    st.markdown("**다음 확인사항**")
+                    for check in summary_card.get("next_checks", []) or ["단지별 실거래와 호가를 추가 확인하세요."]:
+                        st.write(f"- {check}")
+
+                region_card_cols = st.columns(2)
+                for card_col, region_card in zip(region_card_cols, buy_vm.get("region_cards", [])):
+                    with card_col:
+                        score_value = region_card.get("total_score")
+                        score_text = "데이터 부족" if pd.isna(score_value) else f"{score_value:.1f}점"
+                        st.metric(region_card.get("region_name", "지역"), score_text, region_card.get("grade", "판단 보류"))
+                        st.markdown("**강점**")
+                        st.write(", ".join(region_card.get("strengths", [])) if region_card.get("strengths") else "뚜렷한 강점 축 없음")
+                        st.markdown("**주의축**")
+                        st.write(", ".join(region_card.get("weaknesses", [])) if region_card.get("weaknesses") else "뚜렷한 주의축 없음")
+                        key_points = region_card.get("key_points", [])
+                        if key_points:
+                            st.dataframe(pd.DataFrame(key_points), use_container_width=True)
+
+                st.subheader("비교표")
+                comparison_rows = buy_vm.get("comparison_rows", [])
+                if comparison_rows:
+                    st.dataframe(pd.DataFrame(comparison_rows), use_container_width=True)
+                else:
+                    st.info("표시할 비교표 데이터가 부족합니다.")
+
+                st.subheader("2x2 차트")
+                chart_titles = {
+                    "price": "매매가격 추이",
+                    "jeonse_ratio": "전세가율 추이",
+                    "transaction_volume": "거래량 추이",
+                    "movein_volume": "입주물량 추이",
+                }
+                chart_positions = {
+                    "price": (1, 1),
+                    "jeonse_ratio": (1, 2),
+                    "transaction_volume": (2, 1),
+                    "movein_volume": (2, 2),
+                }
+                buy_fig = make_subplots(rows=2, cols=2, subplot_titles=[chart_titles[key] for key in chart_positions])
+                has_chart_points = False
+                for chart_key, position in chart_positions.items():
+                    for series in buy_vm.get("charts", {}).get(chart_key, []):
+                        points_df = pd.DataFrame(series.get("points", []))
+                        if points_df.empty:
+                            continue
+                        has_chart_points = True
+                        buy_fig.add_trace(
+                            go.Scatter(x=points_df["연월"], y=points_df["value"], mode="lines+markers", name=f"{chart_titles[chart_key]} - {series.get('region_name', '지역')}"),
+                            row=position[0],
+                            col=position[1],
+                        )
+                buy_fig.update_layout(height=700, font=PLOTLY_FONT, legend=dict(orientation="h"))
+                if has_chart_points:
+                    st.plotly_chart(buy_fig, use_container_width=True)
+                else:
+                    st.info("차트로 표시할 시계열 데이터가 부족합니다.")
+
+                with st.expander("데이터 품질/주의사항", expanded=False):
+                    grouped_quality = buy_vm.get("data_quality_grouped", {})
+                    for group_name in ["필수", "선택", "주의"]:
+                        messages = grouped_quality.get(group_name, [])
+                        if messages:
+                            st.markdown(f"**{group_name}**")
+                            for message in messages:
+                                st.write(f"- {message}")
+                    if not buy_vm.get("data_quality", []):
+                        st.write("필수 데이터 품질 이슈가 확인되지 않았습니다.")
+                    st.write("본 화면은 과거 및 현재 데이터 기반의 비교 참고 자료이며, 투자 판단을 대신하지 않습니다.")
+
 # ============================
 # Tab 1: Overview
 # ============================
@@ -418,6 +636,134 @@ def _cached_value_score(_apt_df, _jeonse_df, _nps_df, year):
 def _cached_rank_sigungu(_apt_df, _nps_df, year):
     """시군구 급지순위 캐싱"""
     return rank_sigungu_grade(_apt_df, _nps_df, year=year)
+
+
+def _parse_korean_price_to_manwon(value):
+    """한국식 호가 문자열을 만원 단위 숫자로 변환."""
+    if pd.isna(value):
+        return np.nan
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return float(value)
+
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "null"}:
+        return np.nan
+    if any(token in text for token in ["협의", "문의", "확인"]):
+        return np.nan
+
+    cleaned = text.replace(",", "").replace(" ", "")
+    cleaned = cleaned.replace("만원", "").replace("만", "")
+
+    eok_match = pd.Series([cleaned]).str.extract(r"([\d.]+)억")[0].iloc[0]
+    if pd.notna(eok_match):
+        eok_value = float(eok_match) * 10000
+        tail = cleaned.split("억", 1)[1]
+        tail_match = pd.Series([tail]).str.extract(r"([\d.]+)")[0].iloc[0]
+        tail_value = float(tail_match) if pd.notna(tail_match) else 0.0
+        return eok_value + tail_value
+
+    number_match = pd.Series([cleaned]).str.extract(r"([\d.]+)")[0].iloc[0]
+    return float(number_match) if pd.notna(number_match) else np.nan
+
+
+def _format_listing_price(value):
+    """만원 단위 매물가격을 한국식 억/만원 표기로 표시."""
+    if pd.isna(value):
+        return "-"
+    value = float(value)
+    if value >= 10000:
+        eok = int(value // 10000)
+        man = int(round(value % 10000))
+        return f"{eok}억" if man == 0 else f"{eok}억 {man:,}만"
+    return f"{int(round(value)):,}만"
+
+
+def _clean_listing_df(df: pd.DataFrame) -> pd.DataFrame:
+    """매물현황 화면용 최소 정제."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    cleaned = df.copy()
+    for col in ["시도", "시군구", "단지명", "거래유형", "면적", "층", "매물URL", "동", "향", "중개사", "비고"]:
+        if col in cleaned.columns:
+            cleaned[col] = cleaned[col].fillna("").astype(str).str.strip()
+            cleaned.loc[cleaned[col].str.lower().isin(["nan", "none", "null"]), col] = ""
+    if "매물가격" in cleaned.columns:
+        cleaned["매물가격"] = cleaned["매물가격"].apply(_parse_korean_price_to_manwon)
+    for col in ["수집일", "확인일"]:
+        if col in cleaned.columns:
+            cleaned[col] = pd.to_datetime(cleaned[col], errors="coerce")
+    return cleaned.reset_index(drop=True)
+
+
+def _filter_listing_df(df: pd.DataFrame, sido=None, sigungu=None, trade_types=None, price_range=None, keyword="") -> pd.DataFrame:
+    """매물현황 필터 적용."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    filtered = df.copy()
+    if sido and "시도" in filtered.columns:
+        filtered = filtered[filtered["시도"].isin(sido)]
+    if sigungu and "시군구" in filtered.columns:
+        filtered = filtered[filtered["시군구"].isin(sigungu)]
+    if trade_types and "거래유형" in filtered.columns:
+        filtered = filtered[filtered["거래유형"].isin(trade_types)]
+    if price_range and "매물가격" in filtered.columns:
+        low, high = price_range
+        filtered = filtered[filtered["매물가격"].between(low, high, inclusive="both")]
+    if keyword:
+        keyword = str(keyword).strip().lower()
+        if keyword:
+            cols = [c for c in ["단지명", "시군구", "시도", "동", "비고"] if c in filtered.columns]
+            if cols:
+                mask = filtered[cols].astype(str).apply(lambda row: keyword in " ".join(row).lower(), axis=1)
+                filtered = filtered[mask]
+    return filtered.reset_index(drop=True)
+
+
+def _summarize_listing_kpis(df: pd.DataFrame) -> dict:
+    """매물현황 KPI 계산."""
+    if df is None or df.empty:
+        return {"매물수": 0, "단지수": 0, "지역수": 0, "중위호가": np.nan, "최저호가": np.nan, "평균호가": np.nan, "최근확인일": None}
+    price = pd.to_numeric(df.get("매물가격", pd.Series(dtype=float)), errors="coerce")
+    latest = None
+    for col in ["확인일", "수집일"]:
+        if col in df.columns and pd.to_datetime(df[col], errors="coerce").notna().any():
+            latest = pd.to_datetime(df[col], errors="coerce").max()
+            break
+    return {
+        "매물수": len(df),
+        "단지수": df["단지명"].replace("", np.nan).nunique() if "단지명" in df.columns else 0,
+        "지역수": df["시군구"].replace("", np.nan).nunique() if "시군구" in df.columns else 0,
+        "중위호가": price.median(),
+        "최저호가": price.min(),
+        "평균호가": price.mean(),
+        "최근확인일": latest,
+    }
+
+
+def _build_complex_listing_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """단지별 매물 요약 테이블 생성."""
+    if df is None or df.empty or "단지명" not in df.columns:
+        return pd.DataFrame()
+    group_cols = [c for c in ["시도", "시군구", "단지명"] if c in df.columns]
+    if not group_cols:
+        return pd.DataFrame()
+    temp = df.copy()
+    temp["매물가격"] = pd.to_numeric(temp.get("매물가격"), errors="coerce")
+    agg_dict = {
+        "매물수": ("매물가격", "count"),
+        "최저호가": ("매물가격", "min"),
+        "중위호가": ("매물가격", "median"),
+        "평균호가": ("매물가격", "mean"),
+        "최고호가": ("매물가격", "max"),
+    }
+    if "거래유형" in temp.columns:
+        agg_dict["거래유형"] = ("거래유형", lambda s: ", ".join(sorted({str(v) for v in s if str(v).strip()})))
+    if "확인일" in temp.columns:
+        agg_dict["최근확인일"] = ("확인일", "max")
+    summary = temp.groupby(group_cols, dropna=False).agg(**agg_dict).reset_index()
+    if "최저호가" in summary.columns:
+        summary = summary.sort_values(["최저호가", "매물수"], ascending=[True, False])
+    return summary.reset_index(drop=True)
 
 
 def normalize_naver_listings(raw_df: pd.DataFrame) -> pd.DataFrame:
@@ -450,13 +796,7 @@ def normalize_naver_listings(raw_df: pd.DataFrame) -> pd.DataFrame:
     normalized["단지명"] = normalized["단지명"].astype(str).str.strip()
     normalized["시군구"] = normalized["시군구"].astype(str).str.strip()
     normalized["거래유형"] = normalized["거래유형"].fillna("매매").astype(str).str.strip()
-    normalized["매물가격"] = (
-        normalized["매물가격"].astype(str)
-        .str.replace(",", "", regex=False)
-        .str.replace("만원", "", regex=False)
-        .str.extract(r"([\d.]+)")[0]
-        .astype(float)
-    )
+    normalized["매물가격"] = normalized["매물가격"].apply(_parse_korean_price_to_manwon)
     normalized = normalized.dropna(subset=["단지명", "매물가격"], how="any")
     return normalized.reset_index(drop=True)
 
@@ -759,6 +1099,7 @@ def _format_signal_summary(row):
 
 with main_tab1:
     st.header(f"시장 Overview ({mode_label})")
+    render_tab_usage_guide("Overview")
     st.caption("역사는 반복된다는 관점에서 과거 국면, 수요·공급의 움직임, 현재와 닮은 신호를 한 화면에서 추적합니다.")
     quality_df, latest_cache_mtime, cache_file_count = _dataset_quality_snapshot({
         "연간통합": yearly_df,
@@ -1333,6 +1674,7 @@ with main_tab1:
             continue
         time_col_src = "연월" if "연월" in src_df.columns else ("연도" if "연도" in src_df.columns else None)
         latest = src_df[time_col_src].dropna().max() if time_col_src else "N/A"
+        latest = "N/A" if pd.isna(latest) else str(latest)
         region_count = src_df["시도"].nunique() if "시도" in src_df.columns else np.nan
         miss = src_df[col].isna().mean() * 100 if len(src_df) else np.nan
         source_rows.append({
@@ -1362,6 +1704,7 @@ with main_tab1:
 # ============================
 with main_tab2:
     st.header("거래현황")
+    render_tab_usage_guide("거래현황")
     st.caption("실거래 흐름과 네이버 매물 호가를 같은 지역/단지 단위로 비교합니다.")
 
     _naver_upload = st.file_uploader(
@@ -1373,12 +1716,13 @@ with main_tab2:
     if _naver_upload is not None:
         st.session_state["naver_listings_df"] = parse_naver_listing_upload(_naver_upload)
 
-    _naver_df = st.session_state.get("naver_listings_df", pd.DataFrame())
+    _naver_df = _clean_listing_df(st.session_state.get("naver_listings_df", pd.DataFrame()))
     if not _naver_df.empty:
+        _naver_price = pd.to_numeric(_naver_df.get("매물가격", pd.Series(dtype=float)), errors="coerce")
         _n1, _n2, _n3 = st.columns(3)
         _n1.metric("업로드 매물", f"{len(_naver_df):,}건")
         _n2.metric("단지 수", f"{_naver_df['단지명'].nunique():,}개")
-        _n3.metric("평균 호가", f"{_naver_df['매물가격'].mean():,.0f}만원")
+        _n3.metric("평균 호가", _format_listing_price(_naver_price.mean()))
         with st.expander("네이버 매물 표준 테이블"):
             st.dataframe(
                 _naver_df.style.format({"매물가격": "{:,.0f}"}, na_rep="N/A"),
@@ -1746,6 +2090,7 @@ with region_sub3:
 # ============================
 with main_tab4:
     st.header("수요-공급 분석기")
+    render_tab_usage_guide("수요공급분석")
     st.caption("모든 변수를 사칙연산으로 조합하여 새로운 지표를 계산하고 시각화합니다.")
 
     # ── 변수 메타데이터 (카테고리/출처 컬럼 추가) ───────────────────
@@ -2329,9 +2674,96 @@ with main_tab4:
 # ============================
 with main_tab5:
     st.header("공급분석")
-    supply_sub1, supply_sub2 = st.tabs(["인허가/착공/준공", "미분양"])
+    supply_sub1, supply_sub2, supply_sub3 = st.tabs(["입주물량", "인허가/착공/준공", "미분양"])
 
     with supply_sub1:
+        st.caption("asil 입주물량 화면처럼 지역·기간별 예정 세대수와 단지 목록을 단순하게 확인합니다.")
+        if movein_sido_monthly_df is not None and not movein_sido_monthly_df.empty:
+            available_movein_sido = sorted(movein_sido_monthly_df["시도"].dropna().unique())
+            preferred_movein_sido = [s for s in selected_sido if s in available_movein_sido]
+            mv_sido_options = list(dict.fromkeys(preferred_movein_sido + available_movein_sido))
+            mv_sido = st.selectbox("입주물량 시도", mv_sido_options, key="movein_sido")
+            mv_min_year = int(movein_sido_monthly_df["연도"].min())
+            mv_max_year = int(movein_sido_monthly_df["연도"].max())
+            if mv_min_year == mv_max_year:
+                mv_start_year = mv_end_year = mv_min_year
+                st.caption(f"입주예정 기간: {mv_min_year}년")
+            else:
+                mv_start_year, mv_end_year = st.slider(
+                    "입주예정 기간",
+                    min_value=mv_min_year,
+                    max_value=mv_max_year,
+                    value=(mv_min_year, mv_max_year),
+                    key="movein_year_range",
+                )
+            mv_monthly = movein_sido_monthly_df[
+                (movein_sido_monthly_df["시도"] == mv_sido)
+                & movein_sido_monthly_df["연도"].between(mv_start_year, mv_end_year)
+            ].sort_values("연월")
+
+            if not mv_monthly.empty:
+                mv_total = int(mv_monthly["입주예정_세대수"].fillna(0).sum())
+                mv_complexes = int(mv_monthly["입주예정_단지수"].fillna(0).sum())
+                mv_peak = mv_monthly.loc[mv_monthly["입주예정_세대수"].idxmax()]
+                c1, c2, c3 = st.columns(3)
+                c1.metric("기간 합계 세대수", f"{mv_total:,}호")
+                c2.metric("기간 합계 단지수", f"{mv_complexes:,}개")
+                c3.metric("최대 입주월", f"{mv_peak['연월']}", f"{int(mv_peak['입주예정_세대수']):,}호")
+
+                fig_movein = px.bar(
+                    mv_monthly,
+                    x="연월",
+                    y="입주예정_세대수",
+                    text="입주예정_단지수",
+                    title=f"{mv_sido}: 월별 입주예정 물량",
+                    labels={"입주예정_세대수": "세대수(호)", "연월": "입주예정월", "입주예정_단지수": "단지수"},
+                )
+                fig_movein.update_traces(texttemplate="%{text}개", textposition="outside")
+                register_fig("입주예정_월별물량", fig_movein, "공급분석")
+                st.plotly_chart(fig_movein, use_container_width=True)
+
+                if movein_sigungu_monthly_df is not None and not movein_sigungu_monthly_df.empty:
+                    mv_sgg = movein_sigungu_monthly_df[
+                        (movein_sigungu_monthly_df["시도"] == mv_sido)
+                        & movein_sigungu_monthly_df["연도"].between(mv_start_year, mv_end_year)
+                    ]
+                    if not mv_sgg.empty:
+                        mv_sgg_rank = (
+                            mv_sgg.groupby("시군구")[["입주예정_세대수", "입주예정_단지수"]]
+                            .sum()
+                            .reset_index()
+                            .sort_values("입주예정_세대수", ascending=False)
+                        )
+                        fig_movein_rank = px.bar(
+                            mv_sgg_rank.head(20),
+                            x="시군구",
+                            y="입주예정_세대수",
+                            color="입주예정_세대수",
+                            color_continuous_scale="Blues",
+                            title=f"{mv_sido}: 시군구별 입주예정 물량 Top 20",
+                        )
+                        register_fig("입주예정_시군구순위", fig_movein_rank, "공급분석")
+                        st.plotly_chart(fig_movein_rank, use_container_width=True)
+                        st.dataframe(mv_sgg_rank.style.format({"입주예정_세대수": "{:,.0f}", "입주예정_단지수": "{:,.0f}"}), use_container_width=True, height=280)
+
+                if movein_plan_df is not None and not movein_plan_df.empty:
+                    mv_complex = movein_plan_df[
+                        (movein_plan_df["시도"] == mv_sido)
+                        & movein_plan_df["연도"].between(mv_start_year, mv_end_year)
+                    ].sort_values(["입주예정연월", "시군구", "단지명"])
+                    display_cols = [
+                        "입주예정연월", "시군구", "단지명", "세대수", "공급세대수",
+                        "주소", "사업유형", "시공사", "source_name", "validation_status",
+                    ]
+                    display_cols = [c for c in display_cols if c in mv_complex.columns]
+                    st.subheader("단지 목록")
+                    st.dataframe(mv_complex[display_cols], use_container_width=True, height=360)
+            else:
+                st.info("선택한 기간의 입주예정 데이터가 없습니다.")
+        else:
+            st.info("data/supply/movein_plan_complex_monthly.csv를 추가하면 입주물량 분석이 활성화됩니다.")
+
+    with supply_sub2:
         # analysis_df에서 공급 관련 컬럼 탐색
         supply_cols = [c for c in ["인허가_호수", "착공_호수", "준공_호수"] if c in analysis_df.columns]
         if supply_cols:
@@ -2360,7 +2792,7 @@ with main_tab5:
         else:
             st.info("착공/준공 데이터를 업데이트하면 이 탭에서 확인할 수 있습니다.")
 
-    with supply_sub2:
+    with supply_sub3:
         # 미분양 데이터 탐색
         unsold_cols = [c for c in ["미분양_호수", "미분양_평균"] if c in analysis_df.columns]
         if unsold_cols:
@@ -2398,6 +2830,7 @@ with main_tab5:
 # ============================
 with valuation_tab:
     st.header("자유차트")
+    render_tab_usage_guide("자유차트")
     st.caption("여러 지역·지표·사용자 지표를 겹쳐 보고, 만든 조건이 과거에 효과 있었는지 바로 검증합니다.")
 
     super_tab, strategy_tab = st.tabs(["슈퍼차트", "전략검증"])
@@ -2408,19 +2841,60 @@ with super_tab:
         st.warning("자유차트에 표시할 데이터가 없습니다.")
     else:
         saved_charts = list_saved_charts()
+        share_token = st.query_params.get("chart_share") if hasattr(st, "query_params") else None
+        if isinstance(share_token, list):
+            share_token = share_token[0] if share_token else None
+        if share_token and st.session_state.get("loaded_chart_share") != share_token:
+            shared_chart = get_shared_chart(str(share_token))
+            if shared_chart:
+                _apply_saved_widget_settings(shared_chart.get("settings", {}))
+                st.session_state["loaded_chart_share"] = share_token
+                st.success(f"공유 차트 '{shared_chart['name']}' 설정을 불러왔습니다.")
+                st.rerun()
+            else:
+                st.warning("공유 차트 토큰이 없거나 비공개로 전환되었습니다.")
+
         with st.expander("저장된 차트", expanded=False):
             if saved_charts:
                 chart_labels = {f"{row['name']} · {row['updated_at'] or row['created_at']}": row for row in saved_charts}
                 selected_saved_chart = st.selectbox("불러올 차트", list(chart_labels.keys()), key="saved_chart_select")
-                sc_load_col, sc_delete_col = st.columns(2)
+                sc_load_col, sc_delete_col, sc_share_col, sc_revoke_col = st.columns(4)
+                selected_saved_row = chart_labels[selected_saved_chart]
                 with sc_load_col:
                     if st.button("차트 불러오기", key="load_saved_chart"):
-                        _apply_saved_widget_settings(json.loads(chart_labels[selected_saved_chart]["settings_json"] or "{}"))
+                        _apply_saved_widget_settings(json.loads(selected_saved_row["settings_json"] or "{}"))
                         st.rerun()
                 with sc_delete_col:
                     if st.button("저장 차트 삭제", key="delete_saved_chart"):
-                        delete_saved_chart(int(chart_labels[selected_saved_chart]["id"]))
+                        delete_saved_chart(int(selected_saved_row["id"]))
                         st.rerun()
+                with sc_share_col:
+                    if st.button("공유 링크 만들기", key="share_saved_chart"):
+                        token = share_saved_chart(int(selected_saved_row["id"]))
+                        st.session_state["last_chart_share_token"] = token
+                        st.session_state["last_chart_share_id"] = int(selected_saved_row["id"])
+                        st.rerun()
+                with sc_revoke_col:
+                    if st.button("공유 해제", key="revoke_saved_chart"):
+                        revoke_shared_chart(int(selected_saved_row["id"]))
+                        st.session_state.pop("last_chart_share_token", None)
+                        st.session_state.pop("last_chart_share_id", None)
+                        st.rerun()
+
+                selected_chart_id = int(selected_saved_row["id"])
+                if st.session_state.get("last_chart_share_id") == selected_chart_id:
+                    visible_token = st.session_state.get("last_chart_share_token")
+                    if not visible_token:
+                        visible_token = selected_saved_row.get("share_token")
+                else:
+                    visible_token = selected_saved_row.get("share_token")
+                if visible_token:
+                    st.text_input(
+                        "공유 링크",
+                        value=f"?chart_share={visible_token}",
+                        key=f"saved_chart_share_link_{selected_chart_id}",
+                        help="Streamlit 앱 주소 뒤에 이 값을 붙이면 다른 사용자가 같은 차트 설정을 불러올 수 있습니다.",
+                    )
             else:
                 st.info("아직 저장된 차트가 없습니다.")
 
@@ -3636,8 +4110,9 @@ with main_tab9:
 # Tab 10: 소득-매물 매칭
 # ============================
 with listing_tab:
-    st.header("매물찾기")
-    st.caption("구매력, 급지, 실거래, 네이버 호가를 함께 보며 반복 국면에서 살 만한 지역을 찾습니다.")
+    st.header("매물현황")
+    render_tab_usage_guide("매물현황")
+    st.caption("구매력, 급지, 실거래, 네이버 호가를 함께 보며 반복 국면에서 살 만한 지역과 매물을 찾습니다.")
 
     st.subheader("지역검색기")
     st.caption("전국 지역을 조건식으로 훑어 투자 후보를 먼저 좁힙니다. 예: PIR < 15 AND 전세가율 > 60")
@@ -3752,49 +4227,157 @@ with listing_tab:
 
     st.divider()
 
-    _listing_df = st.session_state.get("naver_listings_df", pd.DataFrame())
+    _listing_df = _clean_listing_df(st.session_state.get("naver_listings_df", pd.DataFrame()))
+    st.subheader("매물현황")
+    st.caption("지역과 조건을 선택하면 현재 매물 수, 호가 분포, 변화 확인 대상 단지를 한 화면에서 확인합니다.")
+
     if not _listing_df.empty:
-        _lf1, _lf2, _lf3 = st.columns(3)
-        with _lf1:
-            _listing_sigungu = st.multiselect(
-                "매물 시군구",
-                sorted(_listing_df["시군구"].dropna().unique().tolist()),
-                default=[],
-                key="listing_sigungu_filter",
-            )
-        with _lf2:
-            _listing_trade = st.multiselect(
-                "거래유형",
-                sorted(_listing_df["거래유형"].dropna().unique().tolist()),
-                default=[],
-                key="listing_trade_filter",
-            )
-        with _lf3:
-            _max_listing_price = int(_listing_df["매물가격"].max()) if _listing_df["매물가격"].notna().any() else 0
-            _listing_price_limit = st.number_input(
-                "최대 호가(만원)",
-                min_value=0,
-                value=_max_listing_price,
-                step=1000,
-                key="listing_price_limit",
+        _listing_valid_price = _listing_df["매물가격"].notna() if "매물가격" in _listing_df.columns else pd.Series(False, index=_listing_df.index)
+        if not _listing_valid_price.any():
+            st.warning("매물가격을 해석할 수 없습니다. 업로드 파일의 가격 컬럼 형식을 확인해 주세요.")
+            with st.expander("업로드 원본 매물 목록", expanded=True):
+                st.dataframe(_listing_df, use_container_width=True, height=320, hide_index=True)
+        else:
+            _listing_price_min = int(np.nanmin(_listing_df.loc[_listing_valid_price, "매물가격"]))
+            _listing_price_max = int(np.nanmax(_listing_df.loc[_listing_valid_price, "매물가격"]))
+            if _listing_price_min == _listing_price_max:
+                _listing_price_range = (_listing_price_min, _listing_price_max)
+            else:
+                _listing_price_range = (_listing_price_min, _listing_price_max)
+
+            with st.expander("조회 조건", expanded=True):
+                _lf1, _lf2, _lf3, _lf4 = st.columns([1, 1, 1, 1.3])
+                with _lf1:
+                    _listing_sido_options = sorted([v for v in _listing_df.get("시도", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if v])
+                    _listing_sido = st.multiselect("시도", _listing_sido_options, default=[], key="listing_sido_filter_v2")
+                with _lf2:
+                    _listing_sigungu_options = sorted([v for v in _listing_df.get("시군구", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if v])
+                    _listing_sigungu = st.multiselect("시군구", _listing_sigungu_options, default=[], key="listing_sigungu_filter_v2")
+                with _lf3:
+                    _listing_trade_options = sorted([v for v in _listing_df.get("거래유형", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if v])
+                    _listing_trade = st.multiselect("거래유형", _listing_trade_options, default=[], key="listing_trade_filter_v2")
+                with _lf4:
+                    _listing_keyword = st.text_input("단지/지역 검색", placeholder="예: 잠실, 헬리오시티", key="listing_keyword_filter_v2")
+
+                if _listing_price_min < _listing_price_max:
+                    _listing_price_range = st.slider(
+                        "호가 범위(만원)",
+                        min_value=_listing_price_min,
+                        max_value=_listing_price_max,
+                        value=(_listing_price_min, _listing_price_max),
+                        step=1000,
+                        key="listing_price_range_v2",
+                    )
+                else:
+                    st.caption(f"호가 범위: {_format_listing_price(_listing_price_min)} 단일 가격")
+
+            _filtered_listing = _filter_listing_df(
+                _listing_df,
+                sido=_listing_sido,
+                sigungu=_listing_sigungu,
+                trade_types=_listing_trade,
+                price_range=_listing_price_range,
+                keyword=_listing_keyword,
             )
 
-        _filtered_listing = _listing_df.copy()
-        if _listing_sigungu:
-            _filtered_listing = _filtered_listing[_filtered_listing["시군구"].isin(_listing_sigungu)]
-        if _listing_trade:
-            _filtered_listing = _filtered_listing[_filtered_listing["거래유형"].isin(_listing_trade)]
-        if _listing_price_limit > 0:
-            _filtered_listing = _filtered_listing[_filtered_listing["매물가격"] <= _listing_price_limit]
+            _kpis = _summarize_listing_kpis(_filtered_listing)
+            _lk1, _lk2, _lk3, _lk4, _lk5 = st.columns(5)
+            _lk1.metric("전체 매물", f"{_kpis['매물수']:,}건")
+            _lk2.metric("단지 수", f"{_kpis['단지수']:,}개")
+            _lk3.metric("지역 수", f"{_kpis['지역수']:,}개")
+            _lk4.metric("중위 호가", _format_listing_price(_kpis["중위호가"]))
+            _lk5.metric("최저 호가", _format_listing_price(_kpis["최저호가"]))
+            if _kpis.get("최근확인일") is not None and pd.notna(_kpis["최근확인일"]):
+                st.caption(f"데이터 기준일: {_kpis['최근확인일']:%Y-%m-%d}")
 
-        st.subheader("네이버 매물 후보")
-        st.dataframe(
-            _filtered_listing.sort_values("매물가격").style.format({"매물가격": "{:,.0f}"}, na_rep="N/A"),
-            use_container_width=True,
-            height=320,
-        )
+            if _filtered_listing.empty:
+                st.info("조회 조건에 맞는 매물이 없습니다. 지역, 가격, 거래유형 조건을 넓혀 다시 조회해보세요.")
+            else:
+                _chart_df = _filtered_listing.dropna(subset=["매물가격"]).copy()
+                _lc1, _lc2 = st.columns(2)
+                with _lc1:
+                    _fig_price_hist = px.histogram(
+                        _chart_df,
+                        x="매물가격",
+                        nbins=25,
+                        title="호가 분포",
+                        labels={"매물가격": "호가(만원)"},
+                        color_discrete_sequence=["#2563eb"],
+                    )
+                    _fig_price_hist.update_layout(font=PLOTLY_FONT, height=340, margin=dict(l=10, r=10, t=50, b=10))
+                    st.plotly_chart(_fig_price_hist, use_container_width=True)
+                    register_fig("매물현황_호가분포", _fig_price_hist, "매물현황")
+                with _lc2:
+                    if "시군구" in _chart_df.columns and _chart_df["시군구"].replace("", np.nan).notna().any():
+                        _region_count = (
+                            _chart_df.assign(시군구=_chart_df["시군구"].replace("", "미분류"))
+                            .groupby("시군구")
+                            .size()
+                            .reset_index(name="매물수")
+                            .sort_values("매물수", ascending=False)
+                            .head(15)
+                        )
+                        _fig_region_bar = px.bar(
+                            _region_count,
+                            x="시군구",
+                            y="매물수",
+                            title="지역별 매물 수 Top 15",
+                            text="매물수",
+                            color_discrete_sequence=["#0f766e"],
+                        )
+                        _fig_region_bar.update_traces(textposition="outside")
+                        _fig_region_bar.update_layout(font=PLOTLY_FONT, height=340, margin=dict(l=10, r=10, t=50, b=10))
+                        st.plotly_chart(_fig_region_bar, use_container_width=True)
+                        register_fig("매물현황_지역별매물수", _fig_region_bar, "매물현황")
+                    else:
+                        _trade_count = _chart_df.groupby("거래유형").size().reset_index(name="매물수") if "거래유형" in _chart_df.columns else pd.DataFrame()
+                        if not _trade_count.empty:
+                            _fig_trade = px.pie(_trade_count, names="거래유형", values="매물수", hole=0.45, title="거래유형별 비중")
+                            _fig_trade.update_layout(font=PLOTLY_FONT, height=340, margin=dict(l=10, r=10, t=50, b=10))
+                            st.plotly_chart(_fig_trade, use_container_width=True)
+
+                st.markdown("#### 단지별 매물현황")
+                _complex_summary = _build_complex_listing_summary(_filtered_listing)
+                if _complex_summary.empty:
+                    st.info("단지별로 요약할 수 있는 매물 데이터가 없습니다.")
+                else:
+                    _complex_display = _complex_summary.copy()
+                    for _price_col in ["최저호가", "중위호가", "평균호가", "최고호가"]:
+                        if _price_col in _complex_display.columns:
+                            _complex_display[_price_col] = _complex_display[_price_col].apply(_format_listing_price)
+                    st.dataframe(_complex_display, use_container_width=True, height=340, hide_index=True)
+                    st.download_button(
+                        "단지별 매물현황 CSV 다운로드",
+                        data=_complex_summary.to_csv(index=False).encode("utf-8-sig"),
+                        file_name="listing_complex_summary.csv",
+                        mime="text/csv",
+                        key="listing_complex_download_v2",
+                    )
+
+                with st.expander("원본 매물 목록", expanded=False):
+                    _raw_listing = _filtered_listing.sort_values("매물가격", na_position="last").copy()
+                    _raw_listing["호가표시"] = _raw_listing["매물가격"].apply(_format_listing_price)
+                    _display_cols = [c for c in ["시도", "시군구", "단지명", "거래유형", "호가표시", "면적", "층", "동", "향", "중개사", "확인일", "매물URL", "비고"] if c in _raw_listing.columns]
+                    st.dataframe(
+                        _raw_listing[_display_cols],
+                        use_container_width=True,
+                        height=360,
+                        hide_index=True,
+                        column_config={"매물URL": st.column_config.LinkColumn("원문 링크")} if "매물URL" in _display_cols else None,
+                    )
+                    st.download_button(
+                        "필터링 매물 CSV 다운로드",
+                        data=_filtered_listing.to_csv(index=False).encode("utf-8-sig"),
+                        file_name="filtered_naver_listings.csv",
+                        mime="text/csv",
+                        key="listing_raw_download_v2",
+                    )
+
+                st.caption("매물 정보는 수집 시점 기준 호가입니다. 실매물 여부, 가격, 권리관계는 투자 판단 전 별도 확인이 필요합니다.")
     else:
-        st.info("네이버 매물 CSV/JSON을 거래현황 탭에서 업로드하면 매물 후보 필터가 활성화됩니다.")
+        st.info("거래현황 탭에서 네이버 매물 CSV/JSON을 업로드하면 ASIL식 매물현황 대시보드가 활성화됩니다.")
+        with st.expander("필수 업로드 컬럼 예시"):
+            st.write("단지명, 거래유형, 매물가격, 시도, 시군구, 면적, 층, 매물URL, 확인일")
 
 with main_tab10:
     st.header("소득-매물 매칭 분석")

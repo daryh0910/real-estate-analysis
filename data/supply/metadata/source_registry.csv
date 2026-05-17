@@ -1,0 +1,4 @@
+﻿source,rows,source_names,min_ym,max_ym,allowed_scope,license_note
+lh_public_completion,351,한국토지주택공사_공공주택 준공예정현황,2026-01,2032-10,public_allowed,공공데이터포털 공개 파일데이터 기반. 원천별 이용조건/출처표시 유지 필요.
+local_construction,53,대구광역시 동구_공동주택(아파트)시공현황 | 부산광역시_동래구_주택건설사업계획 승인 현황 | 행정중심복합도시건설청_행복도시 공동주택 준공계획,,2029-02,public_allowed,공공데이터포털 공개 파일데이터 기반. 원천별 이용조건/출처표시 유지 필요.
+reb_movein_plan,675,한국부동산원_주택공급정보_입주예정물량정보,,2027-12,public_allowed,공공데이터포털 공개 파일데이터 기반. 원천별 이용조건/출처표시 유지 필요.

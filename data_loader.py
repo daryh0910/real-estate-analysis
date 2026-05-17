@@ -75,6 +75,9 @@ CONSTRUCTION_PATH = os.path.join(_PROJECT_ROOT, "data", "construction_pipeline_s
 if not os.path.exists(CONSTRUCTION_PATH):
     CONSTRUCTION_PATH = os.path.join(DEMAND_DIR, "construction_pipeline_sido_monthly.csv")
 
+# 단지 단위 입주예정/준공예정 데이터 경로
+MOVEIN_PLAN_PATH = os.path.join(_PROJECT_ROOT, "data", "supply", "movein_plan_complex_monthly.csv")
+
 # 캐시 경로
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 APT_CACHE_PARQUET = os.path.join(CACHE_DIR, "apt_sigungu_monthly.parquet")
@@ -1017,6 +1020,144 @@ def load_construction_data():
     return df
 
 
+def _read_csv_auto(path, **kwargs):
+    """CSV를 utf-8-sig/utf-8/cp949/euc-kr 순서로 읽는다."""
+    last_error = None
+    for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
+        try:
+            return pd.read_csv(path, encoding=enc, **kwargs)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    if last_error:
+        raise last_error
+    return pd.read_csv(path, **kwargs)
+
+
+def _to_number(series):
+    """쉼표/문자 단위가 섞인 숫자 컬럼을 numeric으로 변환한다."""
+    return pd.to_numeric(
+        series.astype(str).str.replace(",", "", regex=False).str.replace(r"[^0-9.-]", "", regex=True),
+        errors="coerce",
+    )
+
+
+def _valid_year_month_mask(series):
+    """YYYY-MM 형식이면서 실제 월(1~12)인 값만 통과시킨다."""
+    text = series.astype(str)
+    format_ok = text.str.match(r"^\d{4}-\d{2}$", na=False)
+    parsed = pd.to_datetime(text, format="%Y-%m", errors="coerce")
+    return format_ok & parsed.notna()
+
+
+def load_movein_plan_data(include_invalid=False):
+    """
+    단지 단위 입주예정/준공예정 데이터를 로드한다.
+
+    Returns:
+        DataFrame [source, 단지명, 주소, 시도, 시군구, 입주예정연월, 세대수,
+        공급세대수, 집계세대수, 연도, 월, validation_status, ...]
+    """
+    base_cols = [
+        "source", "source_name", "source_id", "complex_id", "단지명", "주소",
+        "시도", "시군구", "입주예정연월", "준공연월", "세대수", "공급세대수",
+        "사업유형", "사업주체", "시공사", "source_url", "license_note",
+        "validation_status", "validation_message",
+    ]
+    if not os.path.exists(MOVEIN_PLAN_PATH):
+        return pd.DataFrame(columns=base_cols + ["연도", "월", "연월", "집계세대수"])
+
+    df = _read_csv_auto(MOVEIN_PLAN_PATH, dtype=str, keep_default_na=False)
+    for col in base_cols:
+        if col not in df.columns:
+            df[col] = ""
+
+    if not include_invalid and "validation_status" in df.columns:
+        allowed_status = {"ok", "warn", ""}
+        df = df[df["validation_status"].fillna("").str.lower().isin(allowed_status)].copy()
+
+    if "시도" in df.columns:
+        df["시도"] = df["시도"].apply(_normalize_sido)
+
+    for col in ["세대수", "공급세대수", "일반공급세대수", "특별공급세대수", "위도", "경도", "전용면적"]:
+        if col in df.columns:
+            df[col] = _to_number(df[col])
+
+    # 입주예정연월이 없으면 준공연월을 분석용 연월로 사용한다.
+    df["연월"] = df["입주예정연월"].replace("", np.nan)
+    if "준공연월" in df.columns:
+        df["연월"] = df["연월"].fillna(df["준공연월"].replace("", np.nan))
+    df["연월"] = df["연월"].astype(str).str.slice(0, 7)
+    valid_ym = _valid_year_month_mask(df["연월"])
+    df = df[valid_ym].copy()
+    df["입주예정연월"] = df["연월"]
+    df["연도"] = df["연월"].str.slice(0, 4).astype(int)
+    df["월"] = df["연월"].str.slice(5, 7).astype(int)
+
+    df["집계세대수"] = df["세대수"]
+    if "공급세대수" in df.columns:
+        df["집계세대수"] = df["집계세대수"].fillna(df["공급세대수"])
+    return df.reset_index(drop=True)
+
+
+def _aggregate_movein_monthly(df, group_cols):
+    result_cols = ["연월", *group_cols, "입주예정_세대수", "입주예정_단지수", "연도", "월"]
+    if df is None or df.empty:
+        return pd.DataFrame(columns=result_cols)
+
+    src = df.copy()
+    if "시도" in src.columns:
+        src["시도"] = src["시도"].apply(_normalize_sido)
+    if "validation_status" in src.columns:
+        src = src[src["validation_status"].fillna("").str.lower().isin(["ok", "warn", ""])].copy()
+    if "연월" not in src.columns:
+        primary_ym = src.get("입주예정연월", pd.Series(index=src.index, dtype=object)).replace("", np.nan)
+        fallback_ym = src.get("준공연월", pd.Series(index=src.index, dtype=object)).replace("", np.nan)
+        src["연월"] = primary_ym.fillna(fallback_ym).astype(str).str.slice(0, 7)
+    if "집계세대수" not in src.columns:
+        src["집계세대수"] = _to_number(src.get("세대수", pd.Series(index=src.index, dtype=object)))
+        if "공급세대수" in src.columns:
+            src["집계세대수"] = src["집계세대수"].fillna(_to_number(src["공급세대수"]))
+
+    valid_ym = _valid_year_month_mask(src["연월"])
+    src = src[valid_ym].copy()
+    if src.empty:
+        return pd.DataFrame(columns=result_cols)
+
+    id_col = "__complex_count_key"
+    if "complex_id" in src.columns:
+        complex_key = src["complex_id"].replace("", np.nan)
+    else:
+        complex_key = pd.Series(np.nan, index=src.index, dtype=object)
+    if "단지명" in src.columns:
+        complex_key = complex_key.fillna(src["단지명"].replace("", np.nan))
+    if "주소" in src.columns:
+        complex_key = complex_key.fillna(src["주소"].replace("", np.nan))
+    src[id_col] = complex_key.fillna(pd.Series(src.index.astype(str), index=src.index))
+    grouped = (
+        src.groupby(["연월", *group_cols], dropna=False)
+        .agg(
+            입주예정_세대수=("집계세대수", "sum"),
+            입주예정_단지수=(id_col, "nunique"),
+        )
+        .reset_index()
+        .sort_values(["연월", *group_cols])
+        .reset_index(drop=True)
+    )
+    grouped["연도"] = grouped["연월"].str.slice(0, 4).astype(int)
+    grouped["월"] = grouped["연월"].str.slice(5, 7).astype(int)
+    return grouped
+
+
+def aggregate_movein_sigungu_monthly(df):
+    """입주예정 데이터를 시군구·월별로 집계한다."""
+    return _aggregate_movein_monthly(df, ["시도", "시군구"])
+
+
+def aggregate_movein_sido_monthly(df):
+    """입주예정 데이터를 시도·월별로 집계한다."""
+    return _aggregate_movein_monthly(df, ["시도"])
+
+
 def load_m2_data():
     """M2 광의통화 로드 (전국, 월별). Returns: DataFrame [연월, M2잔액, M2_YoY, 연도, 월]"""
     if not os.path.exists(M2_PATH):
@@ -1143,7 +1284,7 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
               migration_df=None, rate_df=None,
               jeonwolse_df=None, price_index_df=None,
               csi_df=None, kb_df=None,
-              construction_df=None,
+              construction_df=None, movein_df=None,
               kosis_age_pop_df=None,
               m2_df=None, spread_df=None, household_credit_df=None,
               krihs_sentiment_df=None, housing_supply_df=None):
@@ -1314,6 +1455,23 @@ def merge_all(apt_df, pop_df, grdp_df, permit_df, freq="yearly",
                 merged = merged.merge(
                     construction_df[avail_cols], on=["시도", "연도", "월"], how="left"
                 )
+
+    # 입주예정/준공예정 데이터 병합 (시도, 월별)
+    if movein_df is not None and not movein_df.empty:
+        if freq == "yearly":
+            movein_yearly = (
+                aggregate_movein_sido_monthly(movein_df)
+                .groupby(["시도", "연도"])[["입주예정_세대수", "입주예정_단지수"]]
+                .sum()
+                .reset_index()
+            )
+            merged = merged.merge(movein_yearly, on=["시도", "연도"], how="left")
+        else:
+            movein_monthly = aggregate_movein_sido_monthly(movein_df)
+            movein_merge_cols = ["시도", "연도", "월", "입주예정_세대수", "입주예정_단지수"]
+            merged = merged.merge(
+                movein_monthly[movein_merge_cols], on=["시도", "연도", "월"], how="left"
+            )
 
     # 하위호환: migration_df가 전달되면 land_price_df로 사용
     if land_price_df is None and migration_df is not None:
@@ -1621,6 +1779,8 @@ def load_all_data(force_rebuild=False):
         kb_indicators_regional, kb_indicators_national = load_kb_indicators()
     with st.spinner("착공/준공 파이프라인 데이터 로딩 중..."):
         construction_df = load_construction_data()
+    with st.spinner("입주예정 단지 데이터 로딩 중..."):
+        movein_df = load_movein_plan_data()
     with st.spinner("KOSIS 연령대별 인구 데이터 로딩 중..."):
         kosis_age_pop_df = load_kosis_age_population()
     with st.spinner("M2 광의통화 데이터 로딩 중..."):
@@ -1642,7 +1802,7 @@ def load_all_data(force_rebuild=False):
         pop_migration_df=pop_migration_df, rate_df=rate_df,
         jeonwolse_df=jeonwolse_df, price_index_df=price_index_df,
         csi_df=csi_df, kb_df=kb_df,
-        construction_df=construction_df,
+        construction_df=construction_df, movein_df=movein_df,
         kosis_age_pop_df=kosis_age_pop_df,
         m2_df=m2_df, spread_df=spread_df,
         household_credit_df=household_credit_df,
@@ -1667,6 +1827,9 @@ def load_all_data(force_rebuild=False):
         "nts": nts_df,
         "unsold": unsold_df,
         "construction": construction_df,
+        "movein_plan": movein_df,
+        "movein_sigungu_monthly": aggregate_movein_sigungu_monthly(movein_df),
+        "movein_sido_monthly": aggregate_movein_sido_monthly(movein_df),
         "kosis_age_pop": kosis_age_pop_df,
         "land_price": land_price_df,
         "pop_migration": pop_migration_df,

@@ -81,6 +81,9 @@ def init_db():
                 settings_json TEXT NOT NULL,
                 created_at    TEXT NOT NULL,
                 updated_at    TEXT,
+                share_token   TEXT UNIQUE,
+                is_public     INTEGER NOT NULL DEFAULT 0,
+                shared_at     TEXT,
                 UNIQUE(owner_hash, name)
             );
 
@@ -106,6 +109,27 @@ def init_db():
                 UNIQUE(owner_hash, region)
             );
         """)
+
+        # 기존 board.db를 쓰는 경우 saved_charts에 공유용 컬럼을 후속 추가한다.
+        existing_cols = {
+            row["name"] for row in conn.execute("PRAGMA table_info(saved_charts)").fetchall()
+        }
+        migrations = {
+            "share_token": "ALTER TABLE saved_charts ADD COLUMN share_token TEXT UNIQUE",
+            "is_public": "ALTER TABLE saved_charts ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0",
+            "shared_at": "ALTER TABLE saved_charts ADD COLUMN shared_at TEXT",
+        }
+        for col, sql in migrations.items():
+            if col not in existing_cols:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    # SQLite 버전에 따라 UNIQUE 컬럼 ADD가 제한될 수 있어 일반 컬럼으로 폴백한다.
+                    if col == "share_token":
+                        conn.execute("ALTER TABLE saved_charts ADD COLUMN share_token TEXT")
+                    else:
+                        raise
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_charts_share_token ON saved_charts(share_token)")
 
 
 # ── 비밀번호 해싱 ──────────────────────────────────────────
@@ -304,6 +328,54 @@ def get_saved_chart(chart_id: int, owner_hash: str = DEFAULT_OWNER) -> dict:
         result = dict(row)
         result["settings"] = json.loads(result.get("settings_json") or "{}")
         return result
+
+
+def share_saved_chart(chart_id: int, owner_hash: str = DEFAULT_OWNER) -> str:
+    """저장 차트를 공개 공유 상태로 바꾸고 안정적인 토큰을 반환한다."""
+    now = _utc_now()
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, share_token FROM saved_charts WHERE id = ? AND owner_hash = ?",
+            (chart_id, owner_hash),
+        ).fetchone()
+        if not row:
+            return None
+        token = row["share_token"] or secrets.token_urlsafe(16)
+        conn.execute(
+            """UPDATE saved_charts
+               SET share_token = ?, is_public = 1, shared_at = COALESCE(shared_at, ?), updated_at = ?
+               WHERE id = ? AND owner_hash = ?""",
+            (token, now, now, chart_id, owner_hash),
+        )
+        return token
+
+
+def get_shared_chart(share_token: str) -> dict:
+    """공개 공유 토큰으로 저장 차트를 조회한다. 비공개/없음이면 None."""
+    if not share_token:
+        return None
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM saved_charts WHERE share_token = ? AND is_public = 1",
+            (share_token,),
+        ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["settings"] = json.loads(result.get("settings_json") or "{}")
+        return result
+
+
+def revoke_shared_chart(chart_id: int, owner_hash: str = DEFAULT_OWNER) -> bool:
+    """저장 차트의 공개 공유를 해제한다. 토큰은 재사용을 막기 위해 삭제한다."""
+    with get_db() as conn:
+        cur = conn.execute(
+            """UPDATE saved_charts
+               SET share_token = NULL, is_public = 0, shared_at = NULL, updated_at = ?
+               WHERE id = ? AND owner_hash = ?""",
+            (_utc_now(), chart_id, owner_hash),
+        )
+        return cur.rowcount > 0
 
 
 def delete_saved_chart(chart_id: int, owner_hash: str = DEFAULT_OWNER) -> bool:
