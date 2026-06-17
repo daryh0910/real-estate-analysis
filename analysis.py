@@ -1151,6 +1151,27 @@ def calculate_mortgage_loan_capacity(annual_income, annual_rate_pct, dsr_limit=0
     return monthly_payment * (1 - (1 + monthly_rate) ** (-n_payments)) / monthly_rate
 
 
+def calculate_ltv_loan_limit(price, ltv_ratio=0.70):
+    """
+    규제상 LTV 대출한도 = 주택가격 × LTV.
+
+    단위는 입력 price 단위를 그대로 따른다. 예: price가 만원이면 결과도 만원.
+    """
+    price_num = pd.to_numeric(price, errors="coerce")
+    ltv_num = pd.to_numeric(ltv_ratio, errors="coerce")
+
+    if isinstance(price_num, pd.Series):
+        if isinstance(ltv_num, pd.Series):
+            ltv_num = ltv_num.reindex(price_num.index).fillna(0)
+        elif pd.isna(ltv_num):
+            ltv_num = 0
+        return (price_num.fillna(0).clip(lower=0) * ltv_num).clip(lower=0)
+
+    if pd.isna(price_num) or pd.isna(ltv_num):
+        return 0
+    return max(price_num, 0) * max(ltv_num, 0)
+
+
 def compute_financing_capacity(
     df,
     net_asset_col="순자산",
@@ -1160,12 +1181,20 @@ def compute_financing_capacity(
     dsr_limit=0.40,
     loan_years=30,
     default_mortgage_rate=3.5,
+    apply_ltv_limit=False,
+    ltv_ratio=0.70,
+    ltv_ratio_col=None,
 ):
     """
-    자금여력 = 순자산 + PMT 역산 대출가능액.
+    자금여력 = 순자산 + min(PMT 역산 대출가능액, 규제상 LTV 대출한도).
+
+    apply_ltv_limit=False이면 기존 동작처럼 PMT 역산액만 대출가능액으로 쓴다.
 
     Returns 원본 df에 다음 컬럼을 추가:
+    - PMT역산대출가능액_만원
+    - LTV규제한도_만원(apply_ltv_limit=True and price_col 제공 시)
     - 대출가능액_만원
+    - 대출한도제약유형: PMT/LTV/PMT_ONLY
     - 자금여력_만원
     - 자금여력_매매가커버리지(price_col 제공 시)
     """
@@ -1180,12 +1209,28 @@ def compute_financing_capacity(
     else:
         mortgage_rate = pd.Series(default_mortgage_rate, index=result.index, dtype=float)
 
-    result["대출가능액_만원"] = calculate_mortgage_loan_capacity(
+    pmt_capacity = calculate_mortgage_loan_capacity(
         annual_income=annual_income,
         annual_rate_pct=mortgage_rate,
         dsr_limit=dsr_limit,
         loan_years=loan_years,
     ).clip(lower=0)
+    result["PMT역산대출가능액_만원"] = pmt_capacity
+
+    if apply_ltv_limit and price_col and price_col in result.columns:
+        price = pd.to_numeric(result[price_col], errors="coerce").fillna(0)
+        if ltv_ratio_col and ltv_ratio_col in result.columns:
+            row_ltv_ratio = pd.to_numeric(result[ltv_ratio_col], errors="coerce").fillna(ltv_ratio)
+        else:
+            row_ltv_ratio = pd.Series(ltv_ratio, index=result.index, dtype=float)
+        ltv_limit = calculate_ltv_loan_limit(price, row_ltv_ratio)
+        result["LTV규제한도_만원"] = ltv_limit
+        result["대출가능액_만원"] = np.minimum(pmt_capacity, ltv_limit)
+        result["대출한도제약유형"] = np.where(ltv_limit < pmt_capacity, "LTV", "PMT")
+    else:
+        result["대출가능액_만원"] = pmt_capacity
+        result["대출한도제약유형"] = "PMT_ONLY"
+
     result["자금여력_만원"] = (net_assets + result["대출가능액_만원"]).clip(lower=0)
 
     if price_col and price_col in result.columns:
@@ -1197,7 +1242,14 @@ def compute_financing_capacity(
 
 # ── 퍼센타일별 구매력 계산 ─────────────────────────────────────────────────
 
-def compute_purchasing_power(percentile_df, base_rate=3.5, dsr_limit=0.40, loan_years=30):
+def compute_purchasing_power(
+    percentile_df,
+    base_rate=3.5,
+    dsr_limit=0.40,
+    loan_years=30,
+    apply_ltv_limit=False,
+    ltv_ratio=0.70,
+):
     """
     퍼센타일별 구매력(구매가능가격) 계산
 
@@ -1228,14 +1280,27 @@ def compute_purchasing_power(percentile_df, base_rate=3.5, dsr_limit=0.40, loan_
     df["연소득"] = df[income_col] if income_col else 0.0
 
     # 자금여력 = 순자산 + PMT(연소득 × DSR 한도, 30년 원리금균등, 주담대금리)
-    # 여기서 DSR 컬럼은 현재 부채비율 참고지표일 뿐, 대표 구매력 산식에서는 차감하지 않는다.
-    df["대출가능액_만원"] = calculate_mortgage_loan_capacity(
+    # LTV 적용 시 최대 구매가능가격은 min(순자산 + PMT한도, 순자산 / (1 - LTV))로 역산한다.
+    pmt_capacity = calculate_mortgage_loan_capacity(
         annual_income=df["연소득"],
         annual_rate_pct=base_rate,
         dsr_limit=dsr_limit,
         loan_years=loan_years,
     ).clip(lower=0)
-    df["자금여력_만원"] = (df["순자산"] + df["대출가능액_만원"]).clip(lower=0)
+    df["PMT역산대출가능액_만원"] = pmt_capacity
+
+    pmt_based_power = (df["순자산"] + pmt_capacity).clip(lower=0)
+    if apply_ltv_limit:
+        safe_ltv = min(max(float(ltv_ratio), 0.0), 0.999999)
+        ltv_purchase_limit = (df["순자산"] / (1 - safe_ltv)).replace([np.inf, -np.inf], np.nan).fillna(0).clip(lower=0)
+        df["LTV자기자본구매한도_만원"] = ltv_purchase_limit
+        df["자금여력_만원"] = np.minimum(pmt_based_power, ltv_purchase_limit)
+        df["대출한도제약유형"] = np.where(ltv_purchase_limit < pmt_based_power, "LTV", "PMT")
+        df["대출가능액_만원"] = (df["자금여력_만원"] - df["순자산"]).clip(lower=0)
+    else:
+        df["대출가능액_만원"] = pmt_capacity
+        df["자금여력_만원"] = pmt_based_power
+        df["대출한도제약유형"] = "PMT_ONLY"
 
     # 기존 화면/매칭 로직 호환 alias
     df["대출가능액"] = df["대출가능액_만원"]
@@ -1244,7 +1309,8 @@ def compute_purchasing_power(percentile_df, base_rate=3.5, dsr_limit=0.40, loan_
 
     result_cols = [
         "percentile", "순자산", "연소득",
-        "대출가능액_만원", "자금여력_만원",
+        "PMT역산대출가능액_만원", "LTV자기자본구매한도_만원",
+        "대출가능액_만원", "자금여력_만원", "대출한도제약유형",
         "대출가능액", "구매력(만원)", "구매력",
     ]
     return df[[c for c in result_cols if c in df.columns]].reset_index(drop=True)

@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 from analysis import (
+    calculate_ltv_loan_limit,
     calculate_mortgage_loan_capacity,
     compute_financing_capacity,
     compute_lead_lag_signal,
@@ -69,6 +70,112 @@ def test_purchasing_power_uses_full_income_based_loan_capacity_columns():
     assert np.isclose(result.loc[0, "자금여력_만원"], 70_000 + expected_loan)
     assert np.isclose(result.loc[0, "구매력(만원)"], 70_000 + expected_loan)
     assert np.isclose(result.loc[0, "구매력"], 70_000 + expected_loan)
+
+
+def test_purchasing_power_can_be_capped_by_ltv_downpayment_constraint():
+    df = pd.DataFrame({
+        "percentile": [50],
+        "가구_순자산": [20_000],
+        "가구_소득평균": [100_000],
+    })
+
+    result = compute_purchasing_power(
+        df,
+        base_rate=4.0,
+        dsr_limit=0.40,
+        loan_years=30,
+        apply_ltv_limit=True,
+        ltv_ratio=0.60,
+    )
+
+    assert result.loc[0, "LTV자기자본구매한도_만원"] == 50_000
+    assert result.loc[0, "자금여력_만원"] == 50_000
+    assert result.loc[0, "대출한도제약유형"] == "LTV"
+
+
+def test_ltv_loan_limit_uses_price_times_ltv():
+    scalar = calculate_ltv_loan_limit(100_000, 0.70)
+    series = calculate_ltv_loan_limit(pd.Series([100_000, 200_000]), 0.60)
+
+    assert scalar == 70_000
+    assert series.tolist() == [60_000, 120_000]
+
+
+def test_financing_capacity_can_be_capped_by_ltv_limit():
+    df = pd.DataFrame({
+        "가구_순자산": [50_000],
+        "가구_소득평균": [100_000],
+        "주담대금리": [4.0],
+        "매매가_만원": [100_000],
+    })
+
+    result = compute_financing_capacity(
+        df,
+        net_asset_col="가구_순자산",
+        income_col="가구_소득평균",
+        mortgage_rate_col="주담대금리",
+        price_col="매매가_만원",
+        dsr_limit=0.40,
+        loan_years=30,
+        apply_ltv_limit=True,
+        ltv_ratio=0.40,
+    )
+
+    assert result.loc[0, "PMT역산대출가능액_만원"] > 40_000
+    assert result.loc[0, "LTV규제한도_만원"] == 40_000
+    assert result.loc[0, "대출가능액_만원"] == 40_000
+    assert result.loc[0, "자금여력_만원"] == 90_000
+    assert result.loc[0, "대출한도제약유형"] == "LTV"
+
+
+def test_financing_capacity_keeps_pmt_when_pmt_is_below_ltv_limit():
+    df = pd.DataFrame({
+        "가구_순자산": [50_000],
+        "가구_소득평균": [2_000],
+        "주담대금리": [4.0],
+        "매매가_만원": [200_000],
+    })
+
+    result = compute_financing_capacity(
+        df,
+        net_asset_col="가구_순자산",
+        income_col="가구_소득평균",
+        mortgage_rate_col="주담대금리",
+        price_col="매매가_만원",
+        dsr_limit=0.40,
+        loan_years=30,
+        apply_ltv_limit=True,
+        ltv_ratio=0.70,
+    )
+
+    assert result.loc[0, "LTV규제한도_만원"] == 140_000
+    assert np.isclose(result.loc[0, "대출가능액_만원"], result.loc[0, "PMT역산대출가능액_만원"])
+    assert result.loc[0, "대출한도제약유형"] == "PMT"
+
+
+def test_financing_capacity_uses_row_level_ltv_ratio_column():
+    df = pd.DataFrame({
+        "가구_순자산": [0, 0],
+        "가구_소득평균": [100_000, 100_000],
+        "주담대금리": [4.0, 4.0],
+        "매매가_만원": [100_000, 100_000],
+        "LTV": [0.70, 0.40],
+    })
+
+    result = compute_financing_capacity(
+        df,
+        net_asset_col="가구_순자산",
+        income_col="가구_소득평균",
+        mortgage_rate_col="주담대금리",
+        price_col="매매가_만원",
+        dsr_limit=0.40,
+        loan_years=30,
+        apply_ltv_limit=True,
+        ltv_ratio_col="LTV",
+    )
+
+    assert result["LTV규제한도_만원"].tolist() == [70_000, 40_000]
+    assert result["대출가능액_만원"].tolist() == [70_000, 40_000]
 
 
 def sample_monthly_df():

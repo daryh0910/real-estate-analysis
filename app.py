@@ -4384,7 +4384,7 @@ with main_tab10:
     st.caption("소득분위별 구매력을 계산하고, 시군구 급지순위와 매칭합니다.")
 
     # ── 파라미터 섹션 ──────────────────────────────────────────────────
-    _pm_c1, _pm_c2, _pm_c3, _pm_c4 = st.columns(4)
+    _pm_c1, _pm_c2, _pm_c3, _pm_c4, _pm_c5 = st.columns(5)
 
     with _pm_c1:
         # quintile_df의 연도 목록에서 기준연도 선택
@@ -4406,11 +4406,17 @@ with main_tab10:
     with _pm_c4:
         _loan_years = st.selectbox("대출기간 (년)", [20, 25, 30], index=2, key="match_loan_years")
 
+    with _pm_c5:
+        _apply_ltv_limit = st.checkbox("LTV 규제 반영", value=True, key="match_apply_ltv_limit")
+        _ltv_pct = st.number_input("LTV 한도 (%)", min_value=0, max_value=100, value=70, step=5, key="match_ltv_pct")
+        _ltv_ratio = _ltv_pct / 100.0
+    _ltv_label = f"{_ltv_pct}%" if _apply_ltv_limit else "미적용"
+
     st.divider()
 
     # ── 결과 1: 소득분위별 구매력 ──────────────────────────────────────
     st.subheader("퍼센타일별 자금여력")
-    st.caption("자금여력 = 순자산 + PMT 역산 대출가능액(연소득 × DSR 한도, 30년 원리금균등, 주담대금리)")
+    st.caption("자금여력 = 순자산 + min(PMT 역산 대출가능액, 대출규제한도). 구매가능가격 역산 시 LTV 한도는 순자산/(1-LTV)로 반영합니다.")
     try:
         # 보간 → 구매력 계산
         _pct_df = interpolate_quintile_to_percentile(quintile_df, year=_match_year)
@@ -4419,6 +4425,8 @@ with main_tab10:
             base_rate=_base_rate,
             dsr_limit=_dsr_limit,
             loan_years=_loan_years,
+            apply_ltv_limit=_apply_ltv_limit,
+            ltv_ratio=_ltv_ratio,
         )
 
         if _pp_df.empty:
@@ -4432,7 +4440,7 @@ with main_tab10:
                 fig_pp = px.area(
                     _pp_df,
                     x=_pct_col, y=_pp_col,
-                    title=f"소득분위별 자금여력 분포 ({_match_year}년, 주담대금리 {_base_rate}%, DSR {_dsr_pct}%, {_loan_years}년)",
+                    title=f"소득분위별 자금여력 분포 ({_match_year}년, 주담대금리 {_base_rate}%, DSR {_dsr_pct}%, LTV {_ltv_label}, {_loan_years}년)",
                     labels={_pct_col: "소득 퍼센타일 (%)", _pp_col: "자금여력(만원)"},
                     color_discrete_sequence=["#3498db"],
                 )
@@ -4452,9 +4460,9 @@ with main_tab10:
                 st.plotly_chart(fig_pp, use_container_width=True)
 
             # 주요 퍼센타일 테이블
-            _pp_disp_cols = [c for c in [_pct_col, "순자산", "연소득", "대출가능액_만원", "자금여력_만원", "대출가능액", "구매력(만원)"] if c in _pp_df.columns]
+            _pp_disp_cols = [c for c in [_pct_col, "순자산", "연소득", "PMT역산대출가능액_만원", "LTV자기자본구매한도_만원", "대출가능액_만원", "자금여력_만원", "대출한도제약유형", "대출가능액", "구매력(만원)"] if c in _pp_df.columns]
             st.dataframe(
-                _pp_df[_pp_disp_cols].style.format({c: "{:,.0f}" for c in _pp_disp_cols if c != _pct_col}, na_rep="N/A"),
+                _pp_df[_pp_disp_cols].style.format({c: "{:,.0f}" for c in _pp_disp_cols if c not in [_pct_col, "대출한도제약유형"]}, na_rep="N/A"),
                 use_container_width=True, height=280,
             )
     except Exception as e:
