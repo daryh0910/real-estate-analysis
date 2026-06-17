@@ -4397,7 +4397,7 @@ with main_tab10:
         _match_year = st.selectbox("기준연도", _q_years, key="match_year")
 
     with _pm_c2:
-        _base_rate = st.number_input("대출금리 (%)", min_value=0.5, max_value=20.0, value=3.5, step=0.1, key="match_rate")
+        _base_rate = st.number_input("주담대금리 (%)", min_value=0.5, max_value=20.0, value=3.5, step=0.1, key="match_rate")
 
     with _pm_c3:
         _dsr_pct = st.selectbox("DSR 한도", [40, 50], index=0, key="match_dsr")
@@ -4409,7 +4409,8 @@ with main_tab10:
     st.divider()
 
     # ── 결과 1: 소득분위별 구매력 ──────────────────────────────────────
-    st.subheader("퍼센타일별 구매력")
+    st.subheader("퍼센타일별 자금여력")
+    st.caption("자금여력 = 순자산 + PMT 역산 대출가능액(연소득 × DSR 한도, 30년 원리금균등, 주담대금리)")
     try:
         # 보간 → 구매력 계산
         _pct_df = interpolate_quintile_to_percentile(quintile_df, year=_match_year)
@@ -4424,15 +4425,15 @@ with main_tab10:
             st.warning("구매력 계산 결과가 없습니다. quintile 데이터를 확인하세요.")
         else:
             # 구매력 분포 면적 차트
-            _pp_col = next((c for c in ["구매력", "대출가능액"] if c in _pp_df.columns), None)
+            _pp_col = next((c for c in ["자금여력_만원", "구매력(만원)", "구매력", "대출가능액_만원", "대출가능액"] if c in _pp_df.columns), None)
             _pct_col = "percentile" if "percentile" in _pp_df.columns else _pp_df.columns[0]
 
             if _pp_col:
                 fig_pp = px.area(
                     _pp_df,
                     x=_pct_col, y=_pp_col,
-                    title=f"소득분위별 구매력 분포 ({_match_year}년, 금리 {_base_rate}%, DSR {_dsr_pct}%, {_loan_years}년)",
-                    labels={_pct_col: "소득 퍼센타일 (%)", _pp_col: "구매력(만원)"},
+                    title=f"소득분위별 자금여력 분포 ({_match_year}년, 주담대금리 {_base_rate}%, DSR {_dsr_pct}%, {_loan_years}년)",
+                    labels={_pct_col: "소득 퍼센타일 (%)", _pp_col: "자금여력(만원)"},
                     color_discrete_sequence=["#3498db"],
                 )
                 # 핵심 구간 annotation (상위 1%, 5%, 10%, 50%)
@@ -4451,7 +4452,7 @@ with main_tab10:
                 st.plotly_chart(fig_pp, use_container_width=True)
 
             # 주요 퍼센타일 테이블
-            _pp_disp_cols = [c for c in [_pct_col, "순자산", "연소득", "대출가능액", "구매력"] if c in _pp_df.columns]
+            _pp_disp_cols = [c for c in [_pct_col, "순자산", "연소득", "대출가능액_만원", "자금여력_만원", "대출가능액", "구매력(만원)"] if c in _pp_df.columns]
             st.dataframe(
                 _pp_df[_pp_disp_cols].style.format({c: "{:,.0f}" for c in _pp_disp_cols if c != _pct_col}, na_rep="N/A"),
                 use_container_width=True, height=280,
@@ -4552,7 +4553,7 @@ with main_tab10:
 
                 # 계단 차트: 구매력 곡선 vs 급지별 시장가격 오버레이
                 _pct_col2 = "percentile" if "percentile" in _pp_df.columns else _pp_df.columns[0]
-                _pp_col2  = next((c for c in ["구매력", "대출가능액"] if c in _pp_df.columns), None)
+                _pp_col2  = next((c for c in ["자금여력_만원", "구매력(만원)", "구매력", "대출가능액_만원", "대출가능액"] if c in _pp_df.columns), None)
                 _mkt_col  = "시장가격" if "시장가격" in _match_df.columns else None
                 _pct_interval_col = "percentile_구간" if "percentile_구간" in _match_df.columns else None
 

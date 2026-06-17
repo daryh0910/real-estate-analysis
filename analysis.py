@@ -1125,6 +1125,76 @@ def interpolate_quintile_to_percentile(quintile_df, year, columns=None):
     return pd.DataFrame(result)
 
 
+# ── 대출/자금여력 계산 ─────────────────────────────────────────────────────
+
+def calculate_mortgage_loan_capacity(annual_income, annual_rate_pct, dsr_limit=0.40, loan_years=30):
+    """
+    연소득과 주담대금리로 원리금균등상환 기준 대출가능액(PV)을 계산한다.
+
+    단위는 입력 연소득 단위를 그대로 따른다. 예: 연소득이 만원이면 결과도 만원.
+    공식: 월 PMT = 연소득 * DSR / 12, PV = PMT * [1 - (1+r)^(-n)] / r
+    """
+    income = pd.to_numeric(annual_income, errors="coerce")
+    rate = pd.to_numeric(annual_rate_pct, errors="coerce")
+    monthly_payment = income.fillna(0) * dsr_limit / 12 if isinstance(income, pd.Series) else (0 if pd.isna(income) else income) * dsr_limit / 12
+    monthly_rate = rate / 100 / 12
+    n_payments = loan_years * 12
+
+    if isinstance(monthly_rate, pd.Series):
+        factor = pd.Series(float(loan_years * 12), index=monthly_rate.index, dtype=float)
+        positive_rate = monthly_rate > 0
+        factor.loc[positive_rate] = (1 - (1 + monthly_rate.loc[positive_rate]) ** (-n_payments)) / monthly_rate.loc[positive_rate]
+        return (monthly_payment * factor).fillna(0)
+
+    if pd.isna(monthly_rate) or monthly_rate <= 0:
+        return monthly_payment * loan_years * 12
+    return monthly_payment * (1 - (1 + monthly_rate) ** (-n_payments)) / monthly_rate
+
+
+def compute_financing_capacity(
+    df,
+    net_asset_col="순자산",
+    income_col="연소득",
+    mortgage_rate_col="주담대금리",
+    price_col=None,
+    dsr_limit=0.40,
+    loan_years=30,
+    default_mortgage_rate=3.5,
+):
+    """
+    자금여력 = 순자산 + PMT 역산 대출가능액.
+
+    Returns 원본 df에 다음 컬럼을 추가:
+    - 대출가능액_만원
+    - 자금여력_만원
+    - 자금여력_매매가커버리지(price_col 제공 시)
+    """
+    if df.empty:
+        return df.copy()
+
+    result = df.copy()
+    net_assets = pd.to_numeric(result.get(net_asset_col, 0), errors="coerce").fillna(0)
+    annual_income = pd.to_numeric(result.get(income_col, 0), errors="coerce").fillna(0)
+    if mortgage_rate_col in result.columns:
+        mortgage_rate = pd.to_numeric(result[mortgage_rate_col], errors="coerce").fillna(default_mortgage_rate)
+    else:
+        mortgage_rate = pd.Series(default_mortgage_rate, index=result.index, dtype=float)
+
+    result["대출가능액_만원"] = calculate_mortgage_loan_capacity(
+        annual_income=annual_income,
+        annual_rate_pct=mortgage_rate,
+        dsr_limit=dsr_limit,
+        loan_years=loan_years,
+    ).clip(lower=0)
+    result["자금여력_만원"] = (net_assets + result["대출가능액_만원"]).clip(lower=0)
+
+    if price_col and price_col in result.columns:
+        price = pd.to_numeric(result[price_col], errors="coerce")
+        result["자금여력_매매가커버리지"] = result["자금여력_만원"] / price.replace(0, np.nan)
+
+    return result
+
+
 # ── 퍼센타일별 구매력 계산 ─────────────────────────────────────────────────
 
 def compute_purchasing_power(percentile_df, base_rate=3.5, dsr_limit=0.40, loan_years=30):
@@ -1157,32 +1227,26 @@ def compute_purchasing_power(percentile_df, base_rate=3.5, dsr_limit=0.40, loan_
     income_col = next((c for c in ["가구_소득평균", "가구소득평균", "소득평균"] if c in df.columns), None)
     df["연소득"] = df[income_col] if income_col else 0.0
 
-    # 현재 DSR (이미 % 저장 가정 → 0~1로 변환)
-    dsr_col = next((c for c in ["DSR", "부채상환비율", "가구_DSR"] if c in df.columns), None)
-    if dsr_col:
-        current_dsr = df[dsr_col] / 100.0
-    else:
-        current_dsr = pd.Series(0.0, index=df.index)
+    # 자금여력 = 순자산 + PMT(연소득 × DSR 한도, 30년 원리금균등, 주담대금리)
+    # 여기서 DSR 컬럼은 현재 부채비율 참고지표일 뿐, 대표 구매력 산식에서는 차감하지 않는다.
+    df["대출가능액_만원"] = calculate_mortgage_loan_capacity(
+        annual_income=df["연소득"],
+        annual_rate_pct=base_rate,
+        dsr_limit=dsr_limit,
+        loan_years=loan_years,
+    ).clip(lower=0)
+    df["자금여력_만원"] = (df["순자산"] + df["대출가능액_만원"]).clip(lower=0)
 
-    # 여유 DSR
-    slack_dsr = (dsr_limit - current_dsr).clip(lower=0)
+    # 기존 화면/매칭 로직 호환 alias
+    df["대출가능액"] = df["대출가능액_만원"]
+    df["구매력(만원)"] = df["자금여력_만원"]
+    df["구매력"] = df["자금여력_만원"]
 
-    # 연 상환 가능액 (만원)
-    annual_repayment = df["연소득"] * slack_dsr
-
-    # 대출가능액 계산 (원리금균등상환, 단위: 만원)
-    monthly_rate = base_rate / 100 / 12
-    n_payments = loan_years * 12
-    if monthly_rate > 0:
-        # PV = PMT * [1 - (1+r)^(-n)] / r
-        loan_possible = (annual_repayment / 12) * (1 - (1 + monthly_rate) ** (-n_payments)) / monthly_rate
-    else:
-        loan_possible = annual_repayment * loan_years
-
-    df["대출가능액"] = loan_possible.fillna(0)
-    df["구매력(만원)"] = (df["순자산"] + df["대출가능액"]).clip(lower=0)
-
-    result_cols = ["percentile", "순자산", "연소득", "대출가능액", "구매력(만원)"]
+    result_cols = [
+        "percentile", "순자산", "연소득",
+        "대출가능액_만원", "자금여력_만원",
+        "대출가능액", "구매력(만원)", "구매력",
+    ]
     return df[[c for c in result_cols if c in df.columns]].reset_index(drop=True)
 
 

@@ -2,7 +2,10 @@ import numpy as np
 import pandas as pd
 
 from analysis import (
+    calculate_mortgage_loan_capacity,
+    compute_financing_capacity,
     compute_lead_lag_signal,
+    compute_purchasing_power,
     evaluate_condition_rules,
     peak_drawdown_then_rebound,
     pct_from_peak,
@@ -11,6 +14,61 @@ from analysis import (
     run_region_backtest,
     vs_moving_avg,
 )
+
+
+def test_mortgage_capacity_uses_pmt_present_value_formula():
+    loan = calculate_mortgage_loan_capacity(
+        annual_income=10_000,
+        annual_rate_pct=4.0,
+        dsr_limit=0.40,
+        loan_years=30,
+    )
+    monthly_payment = 10_000 * 0.40 / 12
+    monthly_rate = 0.04 / 12
+    expected = monthly_payment * (1 - (1 + monthly_rate) ** -360) / monthly_rate
+
+    assert np.isclose(loan, expected)
+
+
+def test_financing_capacity_adds_net_assets_and_mortgage_capacity():
+    df = pd.DataFrame({
+        "가구_순자산": [80_000],
+        "가구_소득평균": [12_000],
+        "주담대금리": [4.5],
+        "매매가_만원": [150_000],
+    })
+
+    result = compute_financing_capacity(
+        df,
+        net_asset_col="가구_순자산",
+        income_col="가구_소득평균",
+        mortgage_rate_col="주담대금리",
+        price_col="매매가_만원",
+        dsr_limit=0.40,
+        loan_years=30,
+    )
+
+    expected_loan = calculate_mortgage_loan_capacity(12_000, 4.5, 0.40, 30)
+    assert np.isclose(result.loc[0, "대출가능액_만원"], expected_loan)
+    assert np.isclose(result.loc[0, "자금여력_만원"], 80_000 + expected_loan)
+    assert np.isclose(result.loc[0, "자금여력_매매가커버리지"], (80_000 + expected_loan) / 150_000)
+
+
+def test_purchasing_power_uses_full_income_based_loan_capacity_columns():
+    df = pd.DataFrame({
+        "percentile": [50],
+        "가구_순자산": [70_000],
+        "가구_소득평균": [10_000],
+        "DSR": [20],
+    })
+
+    result = compute_purchasing_power(df, base_rate=4.0, dsr_limit=0.40, loan_years=30)
+    expected_loan = calculate_mortgage_loan_capacity(10_000, 4.0, 0.40, 30)
+
+    assert np.isclose(result.loc[0, "대출가능액_만원"], expected_loan)
+    assert np.isclose(result.loc[0, "자금여력_만원"], 70_000 + expected_loan)
+    assert np.isclose(result.loc[0, "구매력(만원)"], 70_000 + expected_loan)
+    assert np.isclose(result.loc[0, "구매력"], 70_000 + expected_loan)
 
 
 def sample_monthly_df():
