@@ -53,7 +53,9 @@ OUTPUT_DIR = os.path.join(BACKDATA, "수요/수요_집계")
 # API 키 — 환경변수 또는 .env 파일에서 로드
 DATA_GO_KR_KEY = os.environ.get("DATA_GO_KR_KEY", "")
 BOK_API_KEY = os.environ.get("BOK_API_KEY", "")
+KOSIS_API_KEY = os.environ.get("KOSIS_API_KEY", "")
 BOK_BASE_URL = "https://ecos.bok.or.kr/api"
+KOSIS_PARAM_URL = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
 
 # 시도코드 매핑
 SIDO_CODE_MAP = {
@@ -288,122 +290,125 @@ def _fetch_unsold_housing_alt(start_ym="200801", end_ym="202602"):
 
 def fetch_population_migration(start_year=2010, end_year=2026):
     """
-    BOK ECOS API / data.go.kr → 시도별 월별 전입/전출 인구
-    BOK 통계코드: 101Y008 (국내인구이동)
-    주의: 이전에 901Y064를 사용했으나, 해당 코드는 지가변동률임 (버그 수정)
+    KOSIS OpenAPI → 시도별 월별 전입/전출/순이동 인구.
+
+    통계표: DT_1B26001_A01 (시군구별 이동자수)
+    항목: T10=총전입, T20=총전출, T25=순이동
+    주의: BOK 901Y064는 지가변동률이며 인구이동이 아님.
     출력: {OUTPUT_DIR}/population_migration_sido_monthly.csv
     """
     print("=" * 60)
-    print("[2] 인구이동 수집 (BOK/data.go.kr)")
+    print("[2] 인구이동 수집 (KOSIS DT_1B26001_A01)")
     print("=" * 60)
 
-    start_ym = f"{start_year}01"
-    end_ym = f"{end_year}12"
+    try:
+        result = _fetch_population_migration_from_kosis_openapi(start_year, end_year)
+        if result is not None and not result.empty:
+            return result
+    except Exception as e:
+        print(f"  KOSIS 인구이동 API 실패: {e}")
 
-    # BOK ECOS에서 인구이동 통계 조회
-    # 101Y008: 시도별 이동자수, 101Y009: 시도별 순이동
-    # 여러 통계코드를 시도하여 인구이동 데이터를 가져옴
-    bok_migration_codes = ["101Y008", "101Y009", "101Y003"]
-
-    for stat_code in bok_migration_codes:
-        url = (
-            f"{BOK_BASE_URL}/StatisticSearch/{BOK_API_KEY}/json/kr/"
-            f"1/99999/{stat_code}/M/{start_ym}/{end_ym}/"
-        )
-        print(f"  BOK 통계코드 {stat_code} 시도 중...")
-
-        try:
-            resp = _api_get(url)
-            data = resp.json()
-        except Exception as e:
-            print(f"  BOK API 요청 실패: {e}")
-            continue
-
-        if "StatisticSearch" not in data:
-            err_msg = data.get("RESULT", {}).get("MESSAGE", "알 수 없는 오류")
-            print(f"  BOK API 오류 ({stat_code}): {err_msg}")
-            continue
-
-        rows = data["StatisticSearch"]["row"]
-        print(f"  BOK {stat_code}에서 {len(rows)}행 수신")
-
-        all_rows = []
-        for row in rows:
-            time_str = row.get("TIME", "") or ""
-            item1 = (row.get("ITEM_NAME1") or "").strip()
-            item2 = (row.get("ITEM_NAME2") or "").strip()
-            value_str = row.get("DATA_VALUE", "") or ""
-
-            if len(time_str) < 6:
-                continue
-
-            ym = f"{time_str[:4]}-{time_str[4:6]}"
-
-            try:
-                val = float(value_str.replace(",", ""))
-            except (ValueError, AttributeError):
-                continue
-
-            sido = _normalize_sido(item1)
-            if sido is None:
-                sido = _normalize_sido(item2)
-
-            category = item2 if sido == _normalize_sido(item1) else item1
-
-            all_rows.append({
-                "연월": ym,
-                "시도": sido,
-                "구분": category,
-                "인구수": val,
-            })
-
-        if not all_rows:
-            continue
-
-        df = pd.DataFrame(all_rows)
-        df = df.dropna(subset=["시도"])
-
-        # 전입/전출 피벗
-        pivot = df.pivot_table(
-            index=["연월", "시도"],
-            columns="구분",
-            values="인구수",
-            aggfunc="first",
-        ).reset_index()
-        pivot.columns.name = None
-
-        # 컬럼명 정리 - 전입/전출 키워드 찾기
-        result = pivot[["연월", "시도"]].copy()
-        for col in pivot.columns:
-            if "전입" in str(col):
-                result["전입"] = pivot[col]
-            elif "전출" in str(col):
-                result["전출"] = pivot[col]
-
-        if "전입" in result.columns and "전출" in result.columns:
-            result["순이동"] = result["전입"] - result["전출"]
-        elif len(pivot.columns) > 2:
-            # 컬럼명이 다른 경우 모든 숫자 컬럼 포함
-            for col in pivot.columns:
-                if col not in ["연월", "시도"] and pivot[col].dtype in [np.float64, np.int64]:
-                    result[col] = pivot[col]
-
-        result["연도"] = result["연월"].str[:4].astype(int)
-        result["월"] = result["연월"].str[5:7].astype(int)
-        result = result.sort_values(["연월", "시도"]).reset_index(drop=True)
-
-        # 저장
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        out_path = os.path.join(OUTPUT_DIR, "population_migration_sido_monthly.csv")
-        result.to_csv(out_path, index=False, encoding="utf-8-sig")
-        print(f"  저장: {out_path}")
-        print(f"    행 수: {len(result):,}, 시도 수: {result['시도'].nunique()}")
-
-        return result
-
-    # BOK에서 인구이동 데이터를 못 찾으면 data.go.kr 대체
-    print("  BOK에서 인구이동 데이터 없음 → data.go.kr 대체")
+    # KOSIS 실패 시 기존 data.go.kr 대체 API 시도. 해당 API는 500 오류가 잦으므로 fallback 전용.
+    print("  KOSIS에서 인구이동 데이터 없음 → data.go.kr 대체")
     return _fetch_migration_from_kosis(start_year, end_year)
+
+
+def _fetch_population_migration_from_kosis_openapi(start_year=2010, end_year=2026):
+    """KOSIS DT_1B26001_A01에서 시도별 총전입/총전출/순이동 수집."""
+    if not KOSIS_API_KEY:
+        print("  KOSIS_API_KEY 없음")
+        return None
+
+    sido_codes = "11+26+27+28+29+30+31+36+41+51+43+44+52+46+47+48+50"
+    item_codes = "T10+T20+T25"
+    item_map = {"T10": "전입", "T20": "전출", "T25": "순이동"}
+    all_rows = []
+
+    # 월별 17개 시도 × 3항목 × 12개월 = 612셀/년. 10년 청크면 충분히 안전.
+    for yr_s in range(start_year, end_year + 1, 10):
+        yr_e = min(yr_s + 9, end_year)
+        params = {
+            "method": "getList",
+            "apiKey": KOSIS_API_KEY,
+            "orgId": "101",
+            "tblId": "DT_1B26001_A01",
+            "itmId": item_codes,
+            "objL1": sido_codes,
+            "format": "json",
+            "jsonVD": "Y",
+            "prdSe": "M",
+            "startPrdDe": f"{yr_s}01",
+            "endPrdDe": f"{yr_e}12",
+        }
+        print(f"  KOSIS 요청: {yr_s}~{yr_e}")
+        resp = _api_get(KOSIS_PARAM_URL, params=params)
+        data = resp.json()
+        if isinstance(data, dict) and "err" in data:
+            print(f"  KOSIS 오류: {data}")
+            continue
+        if not isinstance(data, list):
+            print(f"  KOSIS 응답 형식 오류: {str(data)[:200]}")
+            continue
+        all_rows.extend(data)
+        print(f"    {len(data):,}행")
+        time.sleep(0.3)
+
+    if not all_rows:
+        return None
+
+    parsed = []
+    for r in all_rows:
+        ym_raw = str(r.get("PRD_DE", ""))
+        if len(ym_raw) < 6:
+            continue
+        item = item_map.get(str(r.get("ITM_ID", "")))
+        if item is None:
+            continue
+        sido = _normalize_sido(r.get("C1_NM", ""))
+        if not sido or sido == "전국":
+            continue
+        try:
+            val = int(float(str(r.get("DT", "")).replace(",", "")))
+        except (TypeError, ValueError):
+            continue
+        parsed.append({
+            "연월": f"{ym_raw[:4]}-{ym_raw[4:6]}",
+            "시도": sido,
+            "구분": item,
+            "인구수": val,
+        })
+
+    if not parsed:
+        return None
+
+    df = pd.DataFrame(parsed)
+    result = df.pivot_table(
+        index=["연월", "시도"],
+        columns="구분",
+        values="인구수",
+        aggfunc="first",
+    ).reset_index()
+    result.columns.name = None
+
+    for col in ["전입", "전출", "순이동"]:
+        if col not in result.columns:
+            result[col] = np.nan
+    # KOSIS 순이동 값이 있더라도 전입-전출과 불일치하면 산식값을 우선한다.
+    result["순이동"] = result["전입"] - result["전출"]
+    result["연도"] = result["연월"].str[:4].astype(int)
+    result["월"] = result["연월"].str[5:7].astype(int)
+    result = result[["연월", "시도", "전입", "전출", "순이동", "연도", "월"]]
+    result = result.sort_values(["연월", "시도"]).reset_index(drop=True)
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, "population_migration_sido_monthly.csv")
+    result.to_csv(out_path, index=False, encoding="utf-8-sig")
+    print(f"  저장: {out_path}")
+    print(
+        f"    행 수: {len(result):,}, 시도 수: {result['시도'].nunique()}, "
+        f"기간: {result['연월'].min()} ~ {result['연월'].max()}"
+    )
+    return result
 
 
 def _fetch_migration_from_kosis(start_year=2010, end_year=2026):

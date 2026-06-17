@@ -1,0 +1,14 @@
+﻿file,exists,rows,cols,columns,null_cells,period_min,period_max,regions,region_sample
+data/population_migration_sido_monthly.csv,True,2244,7,"연월, 시도, 전입, 전출, 순이동, 연도, 월",0,2015-01,2025-12,17.0,"강원, 경기, 경남, 경북, 광주, 대구, 대전, 부산"
+data/csi_monthly.csv,True,132,5,"연월, 소비자심리지수, 주택가격전망CSI, 연도, 월",0,2015-01,2025-12,,
+data/construction_pipeline_sido_monthly.csv,True,2244,12,"연월, 시도, 준공_아파트, 준공_전체, 착공_아파트, 착공_전체, 착공_호수, 준공_호수, 착공_비아파트, 준공_비아파트, 연도, 월",1060,2015-01,2025-12,17.0,"강원, 경기, 경남, 경북, 광주, 대구, 대전, 부산"
+data/land_price_change_sido_monthly.csv,True,2376,5,"연월, 시도, 지가변동률, 연도, 월",0,2015-01,2025-12,18.0,"강원, 경기, 경남, 경북, 광주, 대구, 대전, 부산"
+data/kb_market_supply_demand_monthly.csv,True,1037,7,"시도, 연월, KB_매수우위지수, KB_매매거래지수, KB_전세수급지수, 연도, 월",0,2021-05,2026-05,17.0,"강원, 경기, 경남, 경북, 광주, 대구, 대전, 부산"
+data/kb_indicators_regional_monthly.csv,True,1825,7,"지역명, 연월, KB_PIR, KB_J_PIR, KB_HAI, KB_HOI, KB_월세지수",5672,2008-12,2026-05,9.0,"6개광역시, 강남11개구, 강북14개구, 경기, 기타지방, 서울, 수도권, 인천"
+data/kb_indicators_national_monthly.csv,True,210,2,"연월, KB_선도50지수",0,2008-12,2026-05,,
+data/kosis_household_asset_quintile_yearly.csv,True,48,11,"연도, 소득분위, 가구_금융부채, 가구_금융자산, 가구_부채평균, 가구_소득평균, 가구_순자산, 가구_실물자산, 가구_임대보증금, 가구_자산평균, DSR",0,2017,2024,,
+data/nts_income_sigungu_yearly.csv,True,1824,15,"지역코드, 시도, 시군구, 레벨, 연도, 1인당결정세액_백만원, 1인당총급여_백만원, 결정세액_금액, 결정세액_인원, 과세표준_금액, 과세표준_인원, 급여총계_금액",0,2016,2023,16.0,"강원, 경기, 경남, 경북, 광주, 대구, 대전, 부산"
+data/nps_sigungu_monthly.csv,True,2852,10,"지역코드, 연월, NPS_가입자수, NPS_고지금액합계, NPS_사업장수, NPS_1인당고지금액, NPS_고용증감, 시도, 연도, 월",9,2015-11,2026-02,17.0,"강원, 경기, 경남, 경북, 광주, 대구, 대전, 부산"
+data/unsold_housing_sido_monthly.csv,True,3689,5,"연월, 시도, 미분양_호수, 연도, 월",0,2008-01,2026-01,17.0,"강원, 경기, 경남, 경북, 광주, 대구, 대전, 부산"
+data/bok_housing_loan_sido_monthly.csv,True,3841,8,"연월, 시도, 기타대출_잔액, 주담대_잔액, 주담대_증감률, 주담대_비중, 연도, 월",17,2006-12,2026-01,17.0,"강원, 경기, 경남, 경북, 광주, 대구, 대전, 부산"
+data/base_rate_monthly.csv,True,314,8,"연월, CD_91일, 국고채_10년, 국고채_3년, 국고채_5년, 기준금리, 연도, 월",9,2000-01,2026-02,,
