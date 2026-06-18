@@ -3544,7 +3544,7 @@ with sub_cluster:
 
         if len(cluster_features) >= 2:
             try:
-                clustered_df, centers_df = cluster_regions(analysis_df, cluster_features, n_clusters)
+                clustered_df, centers_df = _cached_cluster_regions(analysis_df, tuple(cluster_features), n_clusters)
 
                 # 클러스터 결과 테이블
                 st.subheader("클러스터별 시도 배정")
