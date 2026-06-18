@@ -658,6 +658,24 @@ def _cached_rank_sigungu(_apt_df, _nps_df, year):
     """시군구 급지순위 캐싱"""
     return rank_sigungu_grade(_apt_df, _nps_df, year=year)
 
+# Prophet 예측은 가장 무거운 연산이므로 결과를 캐싱한다.
+# _df(apt_df 기반)는 세션 내 고정이라 해싱 제외하고 sido/periods/price_col로만 키를 만든다.
+@st.cache_data(show_spinner=False)
+def _cached_forecast_price(_df, sido, periods, price_col):
+    """Prophet 가격예측 캐싱"""
+    return forecast_price(df=_df, sido=sido, periods=periods, price_col=price_col)
+
+# 클러스터링/Granger는 필터된 집계 DF(작음) 기반이므로 DF를 그대로 해싱해 정확히 캐싱한다.
+@st.cache_data(show_spinner=False)
+def _cached_cluster_regions(df, features, n_clusters):
+    """지역 클러스터링 캐싱"""
+    return cluster_regions(df, list(features), n_clusters)
+
+@st.cache_data(show_spinner=False)
+def _cached_granger(df, y_var, x_var, max_lag):
+    """Granger 인과성 캐싱"""
+    return granger_causality_test(df, y_var, x_var, max_lag=max_lag)
+
 
 def _parse_korean_price_to_manwon(value):
     """한국식 호가 문자열을 만원 단위 숫자로 변환."""
