@@ -521,7 +521,7 @@ def render_tab_usage_guide(tab_name):
 
 
 # Tab: 매수판단
-with buy_decision_tab:
+if buy_decision_tab:
     st.header("어디를 살까?")
     st.caption("과거 및 현재 데이터 기준으로 두 지역을 비교하는 참고 화면입니다.")
     render_tab_usage_guide("매수판단")
@@ -1149,7 +1149,7 @@ def _format_signal_summary(row):
     consistency = row.get("반복성", "")
     return f"{direction} {int(lead)}기간, 반복성 {consistency}"
 
-with main_tab1:
+if main_tab1:
     st.header(f"시장 Overview ({mode_label})")
     render_tab_usage_guide("Overview")
     st.caption("역사는 반복된다는 관점에서 과거 국면, 수요·공급의 움직임, 현재와 닮은 신호를 한 화면에서 추적합니다.")
@@ -1754,7 +1754,7 @@ with main_tab1:
 # ============================
 # Tab 2: 시장분석 (시계열비교 + 가격비교 + 갭분석)
 # ============================
-with main_tab2:
+if main_tab2:
     st.header("거래현황")
     render_tab_usage_guide("거래현황")
     st.caption("실거래 흐름과 네이버 매물 호가를 같은 지역/단지 단위로 비교합니다.")
@@ -1787,200 +1787,200 @@ with main_tab2:
     sub_ts, sub_price_cmp, sub_gap = st.tabs(["시계열 비교", "가격비교", "갭분석"])
 
 # ── 시계열 비교 서브탭 ──────────────────────────────────────────────
-with sub_ts:
-    st.header(f"시계열 비교 ({mode_label}, 듀얼 Y축)")
-
-    if analysis_df.empty:
-        st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
-    else:
-        valid_vars_ts = [v for v in available_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            left_var = _render_grouped_indicator_picker(
-                "좌측 Y축",
-                analysis_df,
-                "left",
-                default_group="가격" if analysis_mode == "매매 분석" else "전세",
-                default=price_col,
+    with sub_ts:
+        st.header(f"시계열 비교 ({mode_label}, 듀얼 Y축)")
+    
+        if analysis_df.empty:
+            st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
+        else:
+            valid_vars_ts = [v for v in available_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
+    
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                left_var = _render_grouped_indicator_picker(
+                    "좌측 Y축",
+                    analysis_df,
+                    "left",
+                    default_group="가격" if analysis_mode == "매매 분석" else "전세",
+                    default=price_col,
+                )
+            with col2:
+                right_candidates = [v for v in valid_vars_ts if v != left_var]
+                right_var = _render_grouped_indicator_picker(
+                    "우측 Y축",
+                    analysis_df[[c for c in analysis_df.columns if c in right_candidates or c in ("시도", "연도", "월", "연월")]],
+                    "right",
+                    default_group="수요",
+                    default=right_candidates[0] if right_candidates else None,
+                )
+            with col3:
+                sido_for_ts = st.selectbox("비교 시도", selected_sido if selected_sido else all_sido, key="ts_sido")
+    
+            ts_df = analysis_df[analysis_df["시도"] == sido_for_ts].sort_values("연도")
+            time_col = "연월" if freq == "월별" and "연월" in ts_df.columns else "연도"
+    
+            if not ts_df.empty and left_var in ts_df.columns and right_var in ts_df.columns:
+                fig_dual = make_subplots(specs=[[{"secondary_y": True}]])
+    
+                fig_dual.add_trace(
+                    go.Scatter(x=ts_df[time_col], y=ts_df[left_var], name=left_var, line=dict(color="blue")),
+                    secondary_y=False,
+                )
+                fig_dual.add_trace(
+                    go.Scatter(x=ts_df[time_col], y=ts_df[right_var], name=right_var, line=dict(color="red", dash="dash")),
+                    secondary_y=True,
+                )
+    
+                fig_dual.update_layout(title=f"{sido_for_ts}: {left_var} vs {right_var}", xaxis_title="기간")
+                fig_dual.update_yaxes(title_text=left_var, secondary_y=False)
+                fig_dual.update_yaxes(title_text=right_var, secondary_y=True)
+    
+                # 정책 이벤트 수직선 오버레이
+                show_policy = st.checkbox("정책 이벤트 표시", value=False, key="policy_dual")
+                if show_policy and not policy_events_df.empty:
+                    colors = {"규제강화": "red", "규제완화": "green", "중립": "gray"}
+                    for _, ev in policy_events_df.iterrows():
+                        if time_col == "연도":
+                            x_val = ev["날짜"].year
+                        else:
+                            x_val = ev["날짜"].strftime("%Y-%m-%d") if hasattr(ev["날짜"], "strftime") else str(ev["날짜"])
+                        _ev_color = colors.get(ev.get("방향", ""), "gray")
+                        fig_dual.add_shape(
+                            type="line",
+                            x0=x_val, x1=x_val,
+                            y0=0, y1=1, yref="paper",
+                            line=dict(dash="dot", color=_ev_color, width=1),
+                        )
+                        fig_dual.add_annotation(
+                            x=x_val, y=1.0, yref="paper",
+                            text=ev.get("이벤트명", ""),
+                            showarrow=False, xanchor="right",
+                            font=dict(size=8, color=_ev_color),
+                            textangle=-45,
+                        )
+    
+                register_fig("시계열_듀얼축", fig_dual, "시장분석")
+                st.plotly_chart(fig_dual, use_container_width=True)
+                st.caption(_source_caption([left_var, right_var]))
+    
+                # 상관계수 표시
+                valid = ts_df[[left_var, right_var]].dropna()
+                if len(valid) >= 3:
+                    from scipy import stats as sp_stats
+                    r, p = sp_stats.pearsonr(valid[left_var], valid[right_var])
+                    st.info(f"같이 움직인 정도: **{r:.4f}** (통계 신뢰도: {1 - p:.1%})")
+            else:
+                st.info("선택한 변수의 데이터가 부족합니다.")
+    
+            # 정규화 비교 차트
+            st.subheader("정규화 시계열 비교")
+            norm_vars = st.multiselect(
+                "비교할 변수 선택", valid_vars_ts,
+                default=[v for v in [price_col, "GRDP"] if v in valid_vars_ts],
+                key="norm_vars",
+                format_func=_fmt_var_by_col,
             )
-        with col2:
-            right_candidates = [v for v in valid_vars_ts if v != left_var]
-            right_var = _render_grouped_indicator_picker(
-                "우측 Y축",
-                analysis_df[[c for c in analysis_df.columns if c in right_candidates or c in ("시도", "연도", "월", "연월")]],
-                "right",
-                default_group="수요",
-                default=right_candidates[0] if right_candidates else None,
+            if norm_vars and sido_for_ts:
+                norm_df = ts_df[[time_col] + [v for v in norm_vars if v in ts_df.columns]].dropna()
+                if not norm_df.empty:
+                    for v in norm_vars:
+                        if v in norm_df.columns:
+                            vmin, vmax = norm_df[v].min(), norm_df[v].max()
+                            if vmax > vmin:
+                                norm_df[v] = (norm_df[v] - vmin) / (vmax - vmin)
+                            else:
+                                norm_df[v] = 0
+    
+                    melted = norm_df.melt(id_vars=[time_col], var_name="변수", value_name="정규화값")
+                    fig_norm = px.line(
+                        melted, x=time_col, y="정규화값", color="변수",
+                        title=f"{sido_for_ts}: 정규화 시계열 비교 (0-1 스케일)",
+                    )
+                    register_fig("정규화_비교", fig_norm, "시장분석")
+                    st.plotly_chart(fig_norm, use_container_width=True)
+    
+    # ── 가격비교 서브탭 ─────────────────────────────────────────────────
+    with sub_price_cmp:
+        st.header(f"가격비교 ({mode_label})")
+        st.caption("시도별 가격을 같은 차트에서 비교합니다.")
+    
+        if analysis_df.empty:
+            st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
+        else:
+            # 가격비교 변수 선택
+            pc_vars = [v for v in result_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
+            if pc_vars:
+                pc_var = st.selectbox("비교 변수", pc_vars, key="price_cmp_var", format_func=_fmt_var_by_col)
+                pc_time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
+    
+                # 시도별 가격 추이 라인 차트
+                pc_df = analysis_df.groupby(["시도", pc_time_col])[pc_var].mean().reset_index()
+                fig_pc = px.line(
+                    pc_df.sort_values(pc_time_col),
+                    x=pc_time_col, y=pc_var, color="시도",
+                    title=f"시도별 {pc_var} 추이 비교",
+                    labels={pc_var: "가격(만원)", pc_time_col: "기간"},
+                    markers=True,
+                )
+                register_fig("가격비교_라인", fig_pc, "시장분석")
+                st.plotly_chart(fig_pc, use_container_width=True)
+    
+                # 최근 연도 막대 비교
+                latest_yr = int(analysis_df["연도"].max())
+                pc_latest = analysis_df[analysis_df["연도"] == latest_yr].groupby("시도")[pc_var].mean().reset_index()
+                pc_latest = pc_latest.sort_values(pc_var, ascending=False)
+                fig_pc_bar = px.bar(
+                    pc_latest, x="시도", y=pc_var,
+                    color=pc_var, color_continuous_scale="Blues",
+                    title=f"{latest_yr}년 시도별 {pc_var}",
+                )
+                register_fig("가격비교_바", fig_pc_bar, "시장분석")
+                st.plotly_chart(fig_pc_bar, use_container_width=True)
+            else:
+                st.info("비교할 수 있는 가격 데이터가 없습니다.")
+    
+    # ── 갭분석 서브탭 ───────────────────────────────────────────────────
+    with sub_gap:
+        st.header("갭분석 (매매-전세 갭)")
+        st.caption("매매가격과 전세보증금의 차이(갭)를 시각화합니다.")
+    
+        # 매매가격과 전세보증금 컬럼 탐색
+        gap_apt_col   = "평균가격"       if "평균가격"        in analysis_df.columns else None
+        gap_jeonse_col = "전세_보증금평균" if "전세_보증금평균" in analysis_df.columns else None
+    
+        if gap_apt_col and gap_jeonse_col and analysis_df[gap_apt_col].notna().any() and analysis_df[gap_jeonse_col].notna().any():
+            gap_time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
+            gap_sido = st.selectbox(
+                "시도 선택", selected_sido if selected_sido else all_sido, key="gap_sido"
             )
-        with col3:
-            sido_for_ts = st.selectbox("비교 시도", selected_sido if selected_sido else all_sido, key="ts_sido")
-
-        ts_df = analysis_df[analysis_df["시도"] == sido_for_ts].sort_values("연도")
-        time_col = "연월" if freq == "월별" and "연월" in ts_df.columns else "연도"
-
-        if not ts_df.empty and left_var in ts_df.columns and right_var in ts_df.columns:
-            fig_dual = make_subplots(specs=[[{"secondary_y": True}]])
-
-            fig_dual.add_trace(
-                go.Scatter(x=ts_df[time_col], y=ts_df[left_var], name=left_var, line=dict(color="blue")),
+            gap_df = analysis_df[analysis_df["시도"] == gap_sido].sort_values(gap_time_col).copy()
+            gap_df["매매전세갭"] = gap_df[gap_apt_col] - gap_df[gap_jeonse_col]
+            gap_df["전세가율(%)"] = (gap_df[gap_jeonse_col] / gap_df[gap_apt_col] * 100).where(gap_df[gap_apt_col] > 0)
+    
+            fig_gap = make_subplots(specs=[[{"secondary_y": True}]])
+            fig_gap.add_trace(
+                go.Bar(x=gap_df[gap_time_col], y=gap_df["매매전세갭"], name="매매-전세 갭(만원)",
+                       marker_color="steelblue", opacity=0.7),
                 secondary_y=False,
             )
-            fig_dual.add_trace(
-                go.Scatter(x=ts_df[time_col], y=ts_df[right_var], name=right_var, line=dict(color="red", dash="dash")),
+            fig_gap.add_trace(
+                go.Scatter(x=gap_df[gap_time_col], y=gap_df["전세가율(%)"], name="전세가율(%)",
+                           line=dict(color="tomato", width=2), mode="lines+markers"),
                 secondary_y=True,
             )
-
-            fig_dual.update_layout(title=f"{sido_for_ts}: {left_var} vs {right_var}", xaxis_title="기간")
-            fig_dual.update_yaxes(title_text=left_var, secondary_y=False)
-            fig_dual.update_yaxes(title_text=right_var, secondary_y=True)
-
-            # 정책 이벤트 수직선 오버레이
-            show_policy = st.checkbox("정책 이벤트 표시", value=False, key="policy_dual")
-            if show_policy and not policy_events_df.empty:
-                colors = {"규제강화": "red", "규제완화": "green", "중립": "gray"}
-                for _, ev in policy_events_df.iterrows():
-                    if time_col == "연도":
-                        x_val = ev["날짜"].year
-                    else:
-                        x_val = ev["날짜"].strftime("%Y-%m-%d") if hasattr(ev["날짜"], "strftime") else str(ev["날짜"])
-                    _ev_color = colors.get(ev.get("방향", ""), "gray")
-                    fig_dual.add_shape(
-                        type="line",
-                        x0=x_val, x1=x_val,
-                        y0=0, y1=1, yref="paper",
-                        line=dict(dash="dot", color=_ev_color, width=1),
-                    )
-                    fig_dual.add_annotation(
-                        x=x_val, y=1.0, yref="paper",
-                        text=ev.get("이벤트명", ""),
-                        showarrow=False, xanchor="right",
-                        font=dict(size=8, color=_ev_color),
-                        textangle=-45,
-                    )
-
-            register_fig("시계열_듀얼축", fig_dual, "시장분석")
-            st.plotly_chart(fig_dual, use_container_width=True)
-            st.caption(_source_caption([left_var, right_var]))
-
-            # 상관계수 표시
-            valid = ts_df[[left_var, right_var]].dropna()
-            if len(valid) >= 3:
-                from scipy import stats as sp_stats
-                r, p = sp_stats.pearsonr(valid[left_var], valid[right_var])
-                st.info(f"같이 움직인 정도: **{r:.4f}** (통계 신뢰도: {1 - p:.1%})")
+            fig_gap.update_layout(title=f"{gap_sido}: 매매-전세 갭 & 전세가율", xaxis_title="기간")
+            fig_gap.update_yaxes(title_text="갭(만원)", secondary_y=False)
+            fig_gap.update_yaxes(title_text="전세가율(%)", secondary_y=True)
+            register_fig("갭분석", fig_gap, "시장분석")
+            st.plotly_chart(fig_gap, use_container_width=True)
         else:
-            st.info("선택한 변수의 데이터가 부족합니다.")
-
-        # 정규화 비교 차트
-        st.subheader("정규화 시계열 비교")
-        norm_vars = st.multiselect(
-            "비교할 변수 선택", valid_vars_ts,
-            default=[v for v in [price_col, "GRDP"] if v in valid_vars_ts],
-            key="norm_vars",
-            format_func=_fmt_var_by_col,
-        )
-        if norm_vars and sido_for_ts:
-            norm_df = ts_df[[time_col] + [v for v in norm_vars if v in ts_df.columns]].dropna()
-            if not norm_df.empty:
-                for v in norm_vars:
-                    if v in norm_df.columns:
-                        vmin, vmax = norm_df[v].min(), norm_df[v].max()
-                        if vmax > vmin:
-                            norm_df[v] = (norm_df[v] - vmin) / (vmax - vmin)
-                        else:
-                            norm_df[v] = 0
-
-                melted = norm_df.melt(id_vars=[time_col], var_name="변수", value_name="정규화값")
-                fig_norm = px.line(
-                    melted, x=time_col, y="정규화값", color="변수",
-                    title=f"{sido_for_ts}: 정규화 시계열 비교 (0-1 스케일)",
-                )
-                register_fig("정규화_비교", fig_norm, "시장분석")
-                st.plotly_chart(fig_norm, use_container_width=True)
-
-# ── 가격비교 서브탭 ─────────────────────────────────────────────────
-with sub_price_cmp:
-    st.header(f"가격비교 ({mode_label})")
-    st.caption("시도별 가격을 같은 차트에서 비교합니다.")
-
-    if analysis_df.empty:
-        st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
-    else:
-        # 가격비교 변수 선택
-        pc_vars = [v for v in result_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
-        if pc_vars:
-            pc_var = st.selectbox("비교 변수", pc_vars, key="price_cmp_var", format_func=_fmt_var_by_col)
-            pc_time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
-
-            # 시도별 가격 추이 라인 차트
-            pc_df = analysis_df.groupby(["시도", pc_time_col])[pc_var].mean().reset_index()
-            fig_pc = px.line(
-                pc_df.sort_values(pc_time_col),
-                x=pc_time_col, y=pc_var, color="시도",
-                title=f"시도별 {pc_var} 추이 비교",
-                labels={pc_var: "가격(만원)", pc_time_col: "기간"},
-                markers=True,
-            )
-            register_fig("가격비교_라인", fig_pc, "시장분석")
-            st.plotly_chart(fig_pc, use_container_width=True)
-
-            # 최근 연도 막대 비교
-            latest_yr = int(analysis_df["연도"].max())
-            pc_latest = analysis_df[analysis_df["연도"] == latest_yr].groupby("시도")[pc_var].mean().reset_index()
-            pc_latest = pc_latest.sort_values(pc_var, ascending=False)
-            fig_pc_bar = px.bar(
-                pc_latest, x="시도", y=pc_var,
-                color=pc_var, color_continuous_scale="Blues",
-                title=f"{latest_yr}년 시도별 {pc_var}",
-            )
-            register_fig("가격비교_바", fig_pc_bar, "시장분석")
-            st.plotly_chart(fig_pc_bar, use_container_width=True)
-        else:
-            st.info("비교할 수 있는 가격 데이터가 없습니다.")
-
-# ── 갭분석 서브탭 ───────────────────────────────────────────────────
-with sub_gap:
-    st.header("갭분석 (매매-전세 갭)")
-    st.caption("매매가격과 전세보증금의 차이(갭)를 시각화합니다.")
-
-    # 매매가격과 전세보증금 컬럼 탐색
-    gap_apt_col   = "평균가격"       if "평균가격"        in analysis_df.columns else None
-    gap_jeonse_col = "전세_보증금평균" if "전세_보증금평균" in analysis_df.columns else None
-
-    if gap_apt_col and gap_jeonse_col and analysis_df[gap_apt_col].notna().any() and analysis_df[gap_jeonse_col].notna().any():
-        gap_time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
-        gap_sido = st.selectbox(
-            "시도 선택", selected_sido if selected_sido else all_sido, key="gap_sido"
-        )
-        gap_df = analysis_df[analysis_df["시도"] == gap_sido].sort_values(gap_time_col).copy()
-        gap_df["매매전세갭"] = gap_df[gap_apt_col] - gap_df[gap_jeonse_col]
-        gap_df["전세가율(%)"] = (gap_df[gap_jeonse_col] / gap_df[gap_apt_col] * 100).where(gap_df[gap_apt_col] > 0)
-
-        fig_gap = make_subplots(specs=[[{"secondary_y": True}]])
-        fig_gap.add_trace(
-            go.Bar(x=gap_df[gap_time_col], y=gap_df["매매전세갭"], name="매매-전세 갭(만원)",
-                   marker_color="steelblue", opacity=0.7),
-            secondary_y=False,
-        )
-        fig_gap.add_trace(
-            go.Scatter(x=gap_df[gap_time_col], y=gap_df["전세가율(%)"], name="전세가율(%)",
-                       line=dict(color="tomato", width=2), mode="lines+markers"),
-            secondary_y=True,
-        )
-        fig_gap.update_layout(title=f"{gap_sido}: 매매-전세 갭 & 전세가율", xaxis_title="기간")
-        fig_gap.update_yaxes(title_text="갭(만원)", secondary_y=False)
-        fig_gap.update_yaxes(title_text="전세가율(%)", secondary_y=True)
-        register_fig("갭분석", fig_gap, "시장분석")
-        st.plotly_chart(fig_gap, use_container_width=True)
-    else:
-        st.info("매매가격과 전세보증금 데이터가 모두 있어야 갭분석을 할 수 있습니다.")
-
-
-# ============================
-# Tab 3: 지역별 분석
-# ============================
-with main_tab3:
+            st.info("매매가격과 전세보증금 데이터가 모두 있어야 갭분석을 할 수 있습니다.")
+    
+    
+    # ============================
+    # Tab 3: 지역별 분석
+    # ============================
+if main_tab3:
     st.header(f"지역별 분석 ({mode_label})")
 
     if analysis_mode == "매매 분석":
@@ -1997,150 +1997,150 @@ with main_tab3:
     region_sub1, region_sub2, region_sub3 = st.tabs(["지역순위", "요약통계", "인구이동"])
 
 # ── 지역순위 서브탭 ─────────────────────────────────────────────────
-with region_sub1:
-    if tab4_df.empty:
-        st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
-    else:
-        latest_year = int(tab4_df["연도"].max())
-        st.subheader(f"{latest_year}년 지역별 비교")
-
-        compare_options = [tab4_price, tab4_vol, tab4_unit]
-        if "월세평균" in tab4_df.columns:
-            compare_options.append("월세평균")
-        compare_var = st.selectbox("비교 변수", compare_options, key="compare", format_func=_fmt_var_by_col)
-
-        latest_data = tab4_df[tab4_df["연도"] == latest_year]
-        agg_dict = {
-            tab4_price: (tab4_price, "mean"),
-            tab4_vol: (tab4_vol, "sum"),
-            tab4_unit: (tab4_unit, "mean"),
-        }
-        if "월세평균" in tab4_df.columns:
-            agg_dict["월세평균"] = ("월세평균", "mean")
-
-        chart_data = (
-            latest_data.groupby(["지역코드"]).agg(**agg_dict)
-            .reset_index().sort_values(compare_var, ascending=False)
-        )
-
-        if not chart_data.empty:
-            chart_data["시군구명"] = chart_data["지역코드"].apply(get_sigungu_name)
-            fig_region = px.bar(
-                chart_data.head(30), x="시군구명", y=compare_var,
-                color=compare_var,
-                title=f"{latest_year}년 시군구별 {compare_var} (상위 30개)",
+    with region_sub1:
+        if tab4_df.empty:
+            st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
+        else:
+            latest_year = int(tab4_df["연도"].max())
+            st.subheader(f"{latest_year}년 지역별 비교")
+    
+            compare_options = [tab4_price, tab4_vol, tab4_unit]
+            if "월세평균" in tab4_df.columns:
+                compare_options.append("월세평균")
+            compare_var = st.selectbox("비교 변수", compare_options, key="compare", format_func=_fmt_var_by_col)
+    
+            latest_data = tab4_df[tab4_df["연도"] == latest_year]
+            agg_dict = {
+                tab4_price: (tab4_price, "mean"),
+                tab4_vol: (tab4_vol, "sum"),
+                tab4_unit: (tab4_unit, "mean"),
+            }
+            if "월세평균" in tab4_df.columns:
+                agg_dict["월세평균"] = ("월세평균", "mean")
+    
+            chart_data = (
+                latest_data.groupby(["지역코드"]).agg(**agg_dict)
+                .reset_index().sort_values(compare_var, ascending=False)
             )
-            register_fig("지역순위", fig_region, "지역별 분석")
-            st.plotly_chart(fig_region, use_container_width=True)
-
-        # 시군구별 가격 추이 비교
-        if selected_codes:
-            st.subheader(f"시군구별 {mode_label} 가격 추이")
-            time_col = "연월" if freq == "월별" and "연월" in tab4_df.columns else "연도"
-            if analysis_mode == "매매 분석":
-                trend_df = aggregate_by_code(tab4_df, time_col)
-                trend_price = "평균가격"
+    
+            if not chart_data.empty:
+                chart_data["시군구명"] = chart_data["지역코드"].apply(get_sigungu_name)
+                fig_region = px.bar(
+                    chart_data.head(30), x="시군구명", y=compare_var,
+                    color=compare_var,
+                    title=f"{latest_year}년 시군구별 {compare_var} (상위 30개)",
+                )
+                register_fig("지역순위", fig_region, "지역별 분석")
+                st.plotly_chart(fig_region, use_container_width=True)
+    
+            # 시군구별 가격 추이 비교
+            if selected_codes:
+                st.subheader(f"시군구별 {mode_label} 가격 추이")
+                time_col = "연월" if freq == "월별" and "연월" in tab4_df.columns else "연도"
+                if analysis_mode == "매매 분석":
+                    trend_df = aggregate_by_code(tab4_df, time_col)
+                    trend_price = "평균가격"
+                else:
+                    trend_df = aggregate_rent_by_code(tab4_df, time_col)
+                    trend_price = "보증금평균"
+    
+                if not trend_df.empty:
+                    trend_df["시군구명"] = trend_df["지역코드"].apply(get_sigungu_name)
+                    fig_compare = px.line(
+                        trend_df.sort_values(time_col),
+                        x=time_col, y=trend_price, color="시군구명",
+                        title=f"시군구별 {mode_label} 평균 가격 추이",
+                    )
+                    register_fig("지역비교_라인", fig_compare, "지역별 분석")
+                    st.plotly_chart(fig_compare, use_container_width=True)
             else:
-                trend_df = aggregate_rent_by_code(tab4_df, time_col)
-                trend_price = "보증금평균"
-
-            if not trend_df.empty:
-                trend_df["시군구명"] = trend_df["지역코드"].apply(get_sigungu_name)
-                fig_compare = px.line(
-                    trend_df.sort_values(time_col),
-                    x=time_col, y=trend_price, color="시군구명",
-                    title=f"시군구별 {mode_label} 평균 가격 추이",
-                )
-                register_fig("지역비교_라인", fig_compare, "지역별 분석")
-                st.plotly_chart(fig_compare, use_container_width=True)
+                st.subheader(f"시도별 {mode_label} 가격 추이 비교")
+                if price_col in analysis_df.columns:
+                    yearly_compare = (
+                        analysis_df.groupby(["시도", "연도"])[price_col]
+                        .mean().reset_index()
+                    )
+                    fig_compare = px.line(
+                        yearly_compare.sort_values("연도"),
+                        x="연도", y=price_col, color="시도",
+                        title=f"시도별 {mode_label} 평균 가격 추이",
+                    )
+                    register_fig("지역비교_바", fig_compare, "지역별 분석")
+                    st.plotly_chart(fig_compare, use_container_width=True)
+    
+    # ── 요약통계 서브탭 ─────────────────────────────────────────────────
+    with region_sub2:
+        if tab4_df.empty:
+            st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
         else:
-            st.subheader(f"시도별 {mode_label} 가격 추이 비교")
-            if price_col in analysis_df.columns:
-                yearly_compare = (
-                    analysis_df.groupby(["시도", "연도"])[price_col]
-                    .mean().reset_index()
-                )
-                fig_compare = px.line(
-                    yearly_compare.sort_values("연도"),
-                    x="연도", y=price_col, color="시도",
-                    title=f"시도별 {mode_label} 평균 가격 추이",
-                )
-                register_fig("지역비교_바", fig_compare, "지역별 분석")
-                st.plotly_chart(fig_compare, use_container_width=True)
-
-# ── 요약통계 서브탭 ─────────────────────────────────────────────────
-with region_sub2:
-    if tab4_df.empty:
-        st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
-    else:
-        agg_dict_sum = {
-            tab4_price: (tab4_price, "mean"),
-            tab4_vol: (tab4_vol, "sum"),
-            tab4_unit: (tab4_unit, "mean"),
-        }
-        if "월세평균" in tab4_df.columns:
-            agg_dict_sum["월세평균"] = ("월세평균", "mean")
-
-        # 시군구별 요약 테이블
-        st.subheader("시군구별 요약 통계")
-        summary = (
-            tab4_df.groupby(["지역코드"]).agg(**agg_dict_sum)
-            .reset_index().sort_values(tab4_price, ascending=False)
-        )
-        summary["시군구명"] = summary["지역코드"].apply(get_sigungu_name)
-        if "시도" in tab4_df.columns:
-            sido_map = tab4_df.drop_duplicates("지역코드").set_index("지역코드")["시도"]
-            summary["시도"] = summary["지역코드"].map(sido_map)
-
-        display_cols = ["시군구명"]
-        if "시도" in summary.columns:
-            display_cols.append("시도")
-        display_cols += [c for c in [tab4_price, tab4_vol, tab4_unit] if c in summary.columns]
-        if "월세평균" in summary.columns:
-            display_cols.append("월세평균")
-
-        format_dict = {c: "{:,.0f}" for c in [tab4_price, tab4_vol, tab4_unit, "월세평균"] if c in summary.columns}
-        st.dataframe(
-            summary[display_cols].style.format(format_dict, na_rep="N/A"),
-            use_container_width=True,
-        )
-
-# ── 인구이동 서브탭 ─────────────────────────────────────────────────
-with region_sub3:
-    st.subheader("인구이동 현황")
-    # 인구이동 관련 컬럼 탐색 (전입, 전출, 순이동 포함)
-    migration_cols = [c for c in analysis_df.columns if "전입" in c or "전출" in c or "순이동" in c]
-    if migration_cols:
-        mig_sido = st.selectbox(
-            "시도 선택", selected_sido if selected_sido else all_sido, key="mig_sido"
-        )
-        mig_time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
-        mig_df = analysis_df[analysis_df["시도"] == mig_sido].sort_values(mig_time_col)
-
-        # 전입/전출/순이동 막대차트
-        avail_mig = [c for c in migration_cols if c in mig_df.columns and mig_df[c].notna().any()]
-        if avail_mig:
-            mig_melted = mig_df[[mig_time_col] + avail_mig].melt(
-                id_vars=[mig_time_col], var_name="구분", value_name="인원수"
+            agg_dict_sum = {
+                tab4_price: (tab4_price, "mean"),
+                tab4_vol: (tab4_vol, "sum"),
+                tab4_unit: (tab4_unit, "mean"),
+            }
+            if "월세평균" in tab4_df.columns:
+                agg_dict_sum["월세평균"] = ("월세평균", "mean")
+    
+            # 시군구별 요약 테이블
+            st.subheader("시군구별 요약 통계")
+            summary = (
+                tab4_df.groupby(["지역코드"]).agg(**agg_dict_sum)
+                .reset_index().sort_values(tab4_price, ascending=False)
             )
-            fig_mig = px.bar(
-                mig_melted.sort_values(mig_time_col),
-                x=mig_time_col, y="인원수", color="구분", barmode="group",
-                title=f"{mig_sido}: 인구이동 현황",
-                labels={mig_time_col: "기간", "인원수": "인원(명)"},
+            summary["시군구명"] = summary["지역코드"].apply(get_sigungu_name)
+            if "시도" in tab4_df.columns:
+                sido_map = tab4_df.drop_duplicates("지역코드").set_index("지역코드")["시도"]
+                summary["시도"] = summary["지역코드"].map(sido_map)
+    
+            display_cols = ["시군구명"]
+            if "시도" in summary.columns:
+                display_cols.append("시도")
+            display_cols += [c for c in [tab4_price, tab4_vol, tab4_unit] if c in summary.columns]
+            if "월세평균" in summary.columns:
+                display_cols.append("월세평균")
+    
+            format_dict = {c: "{:,.0f}" for c in [tab4_price, tab4_vol, tab4_unit, "월세평균"] if c in summary.columns}
+            st.dataframe(
+                summary[display_cols].style.format(format_dict, na_rep="N/A"),
+                use_container_width=True,
             )
-            register_fig("인구이동", fig_mig, "지역별 분석")
-            st.plotly_chart(fig_mig, use_container_width=True)
+    
+    # ── 인구이동 서브탭 ─────────────────────────────────────────────────
+    with region_sub3:
+        st.subheader("인구이동 현황")
+        # 인구이동 관련 컬럼 탐색 (전입, 전출, 순이동 포함)
+        migration_cols = [c for c in analysis_df.columns if "전입" in c or "전출" in c or "순이동" in c]
+        if migration_cols:
+            mig_sido = st.selectbox(
+                "시도 선택", selected_sido if selected_sido else all_sido, key="mig_sido"
+            )
+            mig_time_col = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
+            mig_df = analysis_df[analysis_df["시도"] == mig_sido].sort_values(mig_time_col)
+    
+            # 전입/전출/순이동 막대차트
+            avail_mig = [c for c in migration_cols if c in mig_df.columns and mig_df[c].notna().any()]
+            if avail_mig:
+                mig_melted = mig_df[[mig_time_col] + avail_mig].melt(
+                    id_vars=[mig_time_col], var_name="구분", value_name="인원수"
+                )
+                fig_mig = px.bar(
+                    mig_melted.sort_values(mig_time_col),
+                    x=mig_time_col, y="인원수", color="구분", barmode="group",
+                    title=f"{mig_sido}: 인구이동 현황",
+                    labels={mig_time_col: "기간", "인원수": "인원(명)"},
+                )
+                register_fig("인구이동", fig_mig, "지역별 분석")
+                st.plotly_chart(fig_mig, use_container_width=True)
+            else:
+                st.info("선택한 시도의 인구이동 데이터가 없습니다.")
         else:
-            st.info("선택한 시도의 인구이동 데이터가 없습니다.")
-    else:
-        st.info("인구이동 데이터를 업데이트하면 이 탭에서 확인할 수 있습니다.")
-
-
-# ============================
-# Tab 4: 수요-공급 분석기 (구 수식 계산기)
-# ============================
-with main_tab4:
+            st.info("인구이동 데이터를 업데이트하면 이 탭에서 확인할 수 있습니다.")
+    
+    
+    # ============================
+    # Tab 4: 수요-공급 분석기 (구 수식 계산기)
+    # ============================
+if main_tab4:
     st.header("수요-공급 분석기")
     render_tab_usage_guide("수요공급분석")
     st.caption("모든 변수를 사칙연산으로 조합하여 새로운 지표를 계산하고 시각화합니다.")
@@ -2724,7 +2724,7 @@ with main_tab4:
 # ============================
 # Tab 5: 공급분석 (인허가/착공/준공 + 미분양)
 # ============================
-with main_tab5:
+if main_tab5:
     st.header("공급분석")
     supply_sub1, supply_sub2, supply_sub3 = st.tabs(["입주물량", "인허가/착공/준공", "미분양"])
 
@@ -2880,801 +2880,801 @@ with main_tab5:
 # ============================
 # Tab 6: 통계분석 (회귀 + 이상치 + 상관관계)
 # ============================
-with valuation_tab:
+if valuation_tab:
     st.header("자유차트")
     render_tab_usage_guide("자유차트")
     st.caption("여러 지역·지표·사용자 지표를 겹쳐 보고, 만든 조건이 과거에 효과 있었는지 바로 검증합니다.")
 
     super_tab, strategy_tab = st.tabs(["슈퍼차트", "전략검증"])
 
-with super_tab:
-    chart_src = analysis_df.copy()
-    if chart_src.empty:
-        st.warning("자유차트에 표시할 데이터가 없습니다.")
-    else:
-        saved_charts = list_saved_charts()
-        share_token = st.query_params.get("chart_share") if hasattr(st, "query_params") else None
-        if isinstance(share_token, list):
-            share_token = share_token[0] if share_token else None
-        if share_token and st.session_state.get("loaded_chart_share") != share_token:
-            shared_chart = get_shared_chart(str(share_token))
-            if shared_chart:
-                _apply_saved_widget_settings(shared_chart.get("settings", {}))
-                st.session_state["loaded_chart_share"] = share_token
-                st.success(f"공유 차트 '{shared_chart['name']}' 설정을 불러왔습니다.")
-                st.rerun()
-            else:
-                st.warning("공유 차트 토큰이 없거나 비공개로 전환되었습니다.")
-
-        with st.expander("저장된 차트", expanded=False):
-            if saved_charts:
-                chart_labels = {f"{row['name']} · {row['updated_at'] or row['created_at']}": row for row in saved_charts}
-                selected_saved_chart = st.selectbox("불러올 차트", list(chart_labels.keys()), key="saved_chart_select")
-                sc_load_col, sc_delete_col, sc_share_col, sc_revoke_col = st.columns(4)
-                selected_saved_row = chart_labels[selected_saved_chart]
-                with sc_load_col:
-                    if st.button("차트 불러오기", key="load_saved_chart"):
-                        _apply_saved_widget_settings(json.loads(selected_saved_row["settings_json"] or "{}"))
-                        st.rerun()
-                with sc_delete_col:
-                    if st.button("저장 차트 삭제", key="delete_saved_chart"):
-                        delete_saved_chart(int(selected_saved_row["id"]))
-                        st.rerun()
-                with sc_share_col:
-                    if st.button("공유 링크 만들기", key="share_saved_chart"):
-                        token = share_saved_chart(int(selected_saved_row["id"]))
-                        st.session_state["last_chart_share_token"] = token
-                        st.session_state["last_chart_share_id"] = int(selected_saved_row["id"])
-                        st.rerun()
-                with sc_revoke_col:
-                    if st.button("공유 해제", key="revoke_saved_chart"):
-                        revoke_shared_chart(int(selected_saved_row["id"]))
-                        st.session_state.pop("last_chart_share_token", None)
-                        st.session_state.pop("last_chart_share_id", None)
-                        st.rerun()
-
-                selected_chart_id = int(selected_saved_row["id"])
-                if st.session_state.get("last_chart_share_id") == selected_chart_id:
-                    visible_token = st.session_state.get("last_chart_share_token")
-                    if not visible_token:
-                        visible_token = selected_saved_row.get("share_token")
+    with super_tab:
+        chart_src = analysis_df.copy()
+        if chart_src.empty:
+            st.warning("자유차트에 표시할 데이터가 없습니다.")
+        else:
+            saved_charts = list_saved_charts()
+            share_token = st.query_params.get("chart_share") if hasattr(st, "query_params") else None
+            if isinstance(share_token, list):
+                share_token = share_token[0] if share_token else None
+            if share_token and st.session_state.get("loaded_chart_share") != share_token:
+                shared_chart = get_shared_chart(str(share_token))
+                if shared_chart:
+                    _apply_saved_widget_settings(shared_chart.get("settings", {}))
+                    st.session_state["loaded_chart_share"] = share_token
+                    st.success(f"공유 차트 '{shared_chart['name']}' 설정을 불러왔습니다.")
+                    st.rerun()
                 else:
-                    visible_token = selected_saved_row.get("share_token")
-                if visible_token:
-                    st.text_input(
-                        "공유 링크",
-                        value=f"?chart_share={visible_token}",
-                        key=f"saved_chart_share_link_{selected_chart_id}",
-                        help="Streamlit 앱 주소 뒤에 이 값을 붙이면 다른 사용자가 같은 차트 설정을 불러올 수 있습니다.",
+                    st.warning("공유 차트 토큰이 없거나 비공개로 전환되었습니다.")
+    
+            with st.expander("저장된 차트", expanded=False):
+                if saved_charts:
+                    chart_labels = {f"{row['name']} · {row['updated_at'] or row['created_at']}": row for row in saved_charts}
+                    selected_saved_chart = st.selectbox("불러올 차트", list(chart_labels.keys()), key="saved_chart_select")
+                    sc_load_col, sc_delete_col, sc_share_col, sc_revoke_col = st.columns(4)
+                    selected_saved_row = chart_labels[selected_saved_chart]
+                    with sc_load_col:
+                        if st.button("차트 불러오기", key="load_saved_chart"):
+                            _apply_saved_widget_settings(json.loads(selected_saved_row["settings_json"] or "{}"))
+                            st.rerun()
+                    with sc_delete_col:
+                        if st.button("저장 차트 삭제", key="delete_saved_chart"):
+                            delete_saved_chart(int(selected_saved_row["id"]))
+                            st.rerun()
+                    with sc_share_col:
+                        if st.button("공유 링크 만들기", key="share_saved_chart"):
+                            token = share_saved_chart(int(selected_saved_row["id"]))
+                            st.session_state["last_chart_share_token"] = token
+                            st.session_state["last_chart_share_id"] = int(selected_saved_row["id"])
+                            st.rerun()
+                    with sc_revoke_col:
+                        if st.button("공유 해제", key="revoke_saved_chart"):
+                            revoke_shared_chart(int(selected_saved_row["id"]))
+                            st.session_state.pop("last_chart_share_token", None)
+                            st.session_state.pop("last_chart_share_id", None)
+                            st.rerun()
+    
+                    selected_chart_id = int(selected_saved_row["id"])
+                    if st.session_state.get("last_chart_share_id") == selected_chart_id:
+                        visible_token = st.session_state.get("last_chart_share_token")
+                        if not visible_token:
+                            visible_token = selected_saved_row.get("share_token")
+                    else:
+                        visible_token = selected_saved_row.get("share_token")
+                    if visible_token:
+                        st.text_input(
+                            "공유 링크",
+                            value=f"?chart_share={visible_token}",
+                            key=f"saved_chart_share_link_{selected_chart_id}",
+                            help="Streamlit 앱 주소 뒤에 이 값을 붙이면 다른 사용자가 같은 차트 설정을 불러올 수 있습니다.",
+                        )
+                else:
+                    st.info("아직 저장된 차트가 없습니다.")
+    
+            sc_time_col = "연월" if freq == "월별" and "연월" in chart_src.columns else "연도"
+            sc_numeric = _numeric_rule_columns(chart_src)
+            sc_defaults = [c for c in ["평균가격", "전세_보증금평균", "전세가율", "거래량", "PIR", "갭비용"] if c in sc_numeric]
+    
+            sc_c1, sc_c2, sc_c3 = st.columns([1.4, 1.8, 1.2])
+            with sc_c1:
+                sc_regions = st.multiselect(
+                    "지역",
+                    sorted(chart_src["시도"].dropna().unique()),
+                    default=(selected_sido[:3] if selected_sido else ["서울"] if "서울" in chart_src["시도"].unique() else []),
+                    key="super_regions",
+                )
+            with sc_c2:
+                sc_indicators = _render_grouped_indicator_picker(
+                    "지표",
+                    chart_src,
+                    "super_indicators",
+                    default_group="가격",
+                    default=sc_defaults[:2],
+                    multi=True,
+                )
+            with sc_c3:
+                population_cols = {
+                    "총인구", "남자인구", "여자인구", "20대", "남_20대", "여_20대",
+                    "30대", "남_30대", "여_30대", "40대", "남_40대", "여_40대",
+                    "50대이상", "남_50대이상", "여_50대이상",
+                }
+                is_population_chart = bool(set(sc_indicators or []) & population_cols)
+                default_mode_index = 0 if is_population_chart else 1
+                sc_mode = st.selectbox(
+                    "보기 방식",
+                    ["원값", "같은 기준으로 비교", "전년 대비", "전월 대비"],
+                    index=default_mode_index,
+                    key="super_mode",
+                )
+                if is_population_chart and sc_time_col == "연월":
+                    st.caption("인구 지표는 연간 데이터라 월별 화면에서는 같은 연도 안에서 같은 값이 반복됩니다.")
+    
+            custom_expr = st.text_input(
+                "사용자 지표",
+                value="",
+                placeholder="예: 평균가격 / 전세_보증금평균 또는 갭비용 / 평균가격 * 100",
+                key="super_custom_expr",
+            )
+            custom_label = st.text_input("사용자 지표 이름", value="사용자 지표", key="super_custom_label")
+    
+            sc_plot = chart_src[chart_src["시도"].isin(sc_regions)].copy() if sc_regions else chart_src.copy()
+            if custom_expr.strip():
+                computed_custom = _compute_formulas(
+                    ((custom_label, custom_expr),),
+                    tuple(sc_numeric),
+                    tuple(sc_regions),
+                    sc_time_col,
+                    f"super_{freq}_{selected_years}",
+                    chart_src,
+                )
+                if not computed_custom.empty and custom_label in computed_custom.columns:
+                    sc_plot = sc_plot.merge(
+                        computed_custom[[sc_time_col, "시도", custom_label]],
+                        on=[sc_time_col, "시도"],
+                        how="left",
                     )
+                    sc_indicators = list(dict.fromkeys(sc_indicators + [custom_label]))
+    
+            if not sc_indicators:
+                st.info("표시할 지표를 1개 이상 선택하세요.")
             else:
-                st.info("아직 저장된 차트가 없습니다.")
-
-        sc_time_col = "연월" if freq == "월별" and "연월" in chart_src.columns else "연도"
-        sc_numeric = _numeric_rule_columns(chart_src)
-        sc_defaults = [c for c in ["평균가격", "전세_보증금평균", "전세가율", "거래량", "PIR", "갭비용"] if c in sc_numeric]
-
-        sc_c1, sc_c2, sc_c3 = st.columns([1.4, 1.8, 1.2])
-        with sc_c1:
-            sc_regions = st.multiselect(
-                "지역",
-                sorted(chart_src["시도"].dropna().unique()),
-                default=(selected_sido[:3] if selected_sido else ["서울"] if "서울" in chart_src["시도"].unique() else []),
-                key="super_regions",
-            )
-        with sc_c2:
-            sc_indicators = _render_grouped_indicator_picker(
-                "지표",
-                chart_src,
-                "super_indicators",
-                default_group="가격",
-                default=sc_defaults[:2],
-                multi=True,
-            )
-        with sc_c3:
-            population_cols = {
-                "총인구", "남자인구", "여자인구", "20대", "남_20대", "여_20대",
-                "30대", "남_30대", "여_30대", "40대", "남_40대", "여_40대",
-                "50대이상", "남_50대이상", "여_50대이상",
-            }
-            is_population_chart = bool(set(sc_indicators or []) & population_cols)
-            default_mode_index = 0 if is_population_chart else 1
-            sc_mode = st.selectbox(
-                "보기 방식",
-                ["원값", "같은 기준으로 비교", "전년 대비", "전월 대비"],
-                index=default_mode_index,
-                key="super_mode",
-            )
-            if is_population_chart and sc_time_col == "연월":
-                st.caption("인구 지표는 연간 데이터라 월별 화면에서는 같은 연도 안에서 같은 값이 반복됩니다.")
-
-        custom_expr = st.text_input(
-            "사용자 지표",
-            value="",
-            placeholder="예: 평균가격 / 전세_보증금평균 또는 갭비용 / 평균가격 * 100",
-            key="super_custom_expr",
-        )
-        custom_label = st.text_input("사용자 지표 이름", value="사용자 지표", key="super_custom_label")
-
-        sc_plot = chart_src[chart_src["시도"].isin(sc_regions)].copy() if sc_regions else chart_src.copy()
-        if custom_expr.strip():
-            computed_custom = _compute_formulas(
-                ((custom_label, custom_expr),),
-                tuple(sc_numeric),
-                tuple(sc_regions),
-                sc_time_col,
-                f"super_{freq}_{selected_years}",
-                chart_src,
-            )
-            if not computed_custom.empty and custom_label in computed_custom.columns:
-                sc_plot = sc_plot.merge(
-                    computed_custom[[sc_time_col, "시도", custom_label]],
-                    on=[sc_time_col, "시도"],
+                plot_rows = []
+                for region, group in sc_plot.groupby("시도"):
+                    group = group.sort_values(sc_time_col).copy()
+                    for ind in sc_indicators:
+                        if ind not in group.columns:
+                            continue
+                        series = group[ind].astype(float)
+                        if sc_mode == "같은 기준으로 비교":
+                            first = series.dropna().iloc[0] if not series.dropna().empty else np.nan
+                            value = series / first * 100 if pd.notna(first) and first != 0 else np.nan
+                            label = "Index=100"
+                        elif sc_mode == "전년 대비":
+                            period = 12 if sc_time_col == "연월" else 1
+                            value = series.pct_change(period) * 100
+                            label = "변화율(%)"
+                        elif sc_mode == "전월 대비":
+                            value = series.pct_change(1) * 100
+                            label = "변화율(%)"
+                        else:
+                            value = series
+                            label = "값"
+                        temp = pd.DataFrame({
+                            sc_time_col: group[sc_time_col],
+                            "지역": region,
+                            "지표": ind,
+                            "계열": f"{region} · {_indicator_label(ind)}",
+                            "표시값": value,
+                            "축": label,
+                        })
+                        plot_rows.append(temp)
+    
+                sc_long = pd.concat(plot_rows, ignore_index=True) if plot_rows else pd.DataFrame()
+                if sc_long.empty or sc_long["표시값"].dropna().empty:
+                    st.info("표시 가능한 값이 없습니다.")
+                else:
+                    fig_super = px.line(
+                        sc_long.dropna(subset=["표시값"]).sort_values(sc_time_col),
+                        x=sc_time_col,
+                        y="표시값",
+                        color="계열",
+                        line_dash="지표",
+                        markers=True,
+                        title="자유차트",
+                        labels={sc_time_col: "기간", "표시값": sc_long["축"].dropna().iloc[0]},
+                    )
+                    register_fig("자유차트_슈퍼차트", fig_super, "자유차트")
+                    st.plotly_chart(fig_super, use_container_width=True)
+                    st.caption(_source_caption(sc_indicators))
+                    save_col1, save_col2 = st.columns([2, 1])
+                    with save_col1:
+                        sc_save_name = st.text_input("차트 저장 이름", value="내 자유차트", key="super_save_name")
+                    with save_col2:
+                        st.write("")
+                        st.write("")
+                        if st.button("현재 차트 저장", key="super_save_button"):
+                            save_chart_settings(
+                                sc_save_name.strip() or "내 자유차트",
+                                _chart_save_payload({"time_col": sc_time_col}),
+                            )
+                            st.success("차트 설정을 저장했습니다.")
+    
+            with st.expander("전세-매매 선행 신호 같이 보기"):
+                if "평균가격" in chart_src.columns and "전세_보증금평균" in chart_src.columns:
+                    sc_ll = compute_lead_lag_signal(
+                        sc_plot,
+                        sale_col="평균가격",
+                        jeonse_col="전세_보증금평균",
+                        time_col=sc_time_col,
+                        max_lag=6,
+                    )
+                    if sc_ll.empty:
+                        st.info("선행 신호를 계산할 표본이 부족합니다.")
+                    else:
+                        st.dataframe(
+                            sc_ll[["지역", "선행방향", "먼저움직인기간", "같이움직인정도", "통계신뢰도", "반복성", "요약"]]
+                            .style.format({"같이움직인정도": "{:.3f}", "통계신뢰도": "{:.1%}"}, na_rep="N/A"),
+                            use_container_width=True,
+                        )
+                else:
+                    st.info("매매가격과 전세보증금 데이터가 필요합니다.")
+    
+    with strategy_tab:
+        bt_src = analysis_df.copy()
+        if bt_src.empty:
+            st.warning("전략검증에 사용할 데이터가 없습니다.")
+        else:
+            bt_time_col = "연월" if freq == "월별" and "연월" in bt_src.columns else "연도"
+            bt_lead = compute_lead_lag_signal(
+                bt_src,
+                sale_col="평균가격",
+                jeonse_col="전세_보증금평균",
+                time_col=bt_time_col,
+                max_lag=6,
+            ) if "평균가격" in bt_src.columns and "전세_보증금평균" in bt_src.columns else pd.DataFrame()
+            bt_work = prepare_screener_dataset(bt_src, lead_lag_df=bt_lead, time_col=bt_time_col)
+            # 최신 스냅샷 조건뿐 아니라 과거 전체 행 조건도 검증할 수 있도록 선행 신호는 지역별로 붙인다.
+            if not bt_lead.empty and "지역" in bt_lead.columns:
+                bt_src = bt_src.merge(
+                    bt_lead[["지역", "선행방향", "먼저움직인기간", "반복성"]],
+                    left_on="시도",
+                    right_on="지역",
                     how="left",
                 )
-                sc_indicators = list(dict.fromkeys(sc_indicators + [custom_label]))
-
-        if not sc_indicators:
-            st.info("표시할 지표를 1개 이상 선택하세요.")
-        else:
-            plot_rows = []
-            for region, group in sc_plot.groupby("시도"):
-                group = group.sort_values(sc_time_col).copy()
-                for ind in sc_indicators:
-                    if ind not in group.columns:
-                        continue
-                    series = group[ind].astype(float)
-                    if sc_mode == "같은 기준으로 비교":
-                        first = series.dropna().iloc[0] if not series.dropna().empty else np.nan
-                        value = series / first * 100 if pd.notna(first) and first != 0 else np.nan
-                        label = "Index=100"
-                    elif sc_mode == "전년 대비":
-                        period = 12 if sc_time_col == "연월" else 1
-                        value = series.pct_change(period) * 100
-                        label = "변화율(%)"
-                    elif sc_mode == "전월 대비":
-                        value = series.pct_change(1) * 100
-                        label = "변화율(%)"
+            period = 12 if bt_time_col == "연월" else 1
+            for col, new_col in [("평균가격", "가격_YoY"), ("거래량", "거래량_YoY"), ("전세가율", "전세가율_변화"), ("갭비용", "갭비용_변화")]:
+                if col in bt_src.columns:
+                    bt_src[new_col] = bt_src.groupby("시도")[col].pct_change(period) * 100
+    
+            st.subheader("조건 만들기")
+            bt_cols = _numeric_rule_columns(bt_src) + [c for c in ["선행방향", "반복성"] if c in bt_src.columns]
+            bt_defaults = [
+                {"column": "PIR", "op": "<", "value": "15"} if "PIR" in bt_cols else None,
+                {"column": "전세가율", "op": ">", "value": "60"} if "전세가율" in bt_cols else None,
+                {"column": "선행방향", "op": "==", "value": "전세 선행"} if "선행방향" in bt_cols else None,
+            ]
+            bt_defaults = [r for r in bt_defaults if r]
+            bt_rules, bt_combine = _render_condition_builder("bt", bt_cols, default_rules=bt_defaults)
+            with st.expander("조건 저장", expanded=False):
+                bt_condition_name = st.text_input("조건 이름", value="전략검증 조건", key="bt_condition_name")
+                if st.button("현재 조건 저장", key="bt_save_condition"):
+                    if bt_rules:
+                        save_condition_set(bt_condition_name.strip() or "전략검증 조건", bt_rules, bt_combine)
+                        st.success("조건을 저장했습니다.")
                     else:
-                        value = series
-                        label = "값"
-                    temp = pd.DataFrame({
-                        sc_time_col: group[sc_time_col],
-                        "지역": region,
-                        "지표": ind,
-                        "계열": f"{region} · {_indicator_label(ind)}",
-                        "표시값": value,
-                        "축": label,
-                    })
-                    plot_rows.append(temp)
-
-            sc_long = pd.concat(plot_rows, ignore_index=True) if plot_rows else pd.DataFrame()
-            if sc_long.empty or sc_long["표시값"].dropna().empty:
-                st.info("표시 가능한 값이 없습니다.")
-            else:
-                fig_super = px.line(
-                    sc_long.dropna(subset=["표시값"]).sort_values(sc_time_col),
-                    x=sc_time_col,
-                    y="표시값",
-                    color="계열",
-                    line_dash="지표",
-                    markers=True,
-                    title="자유차트",
-                    labels={sc_time_col: "기간", "표시값": sc_long["축"].dropna().iloc[0]},
-                )
-                register_fig("자유차트_슈퍼차트", fig_super, "자유차트")
-                st.plotly_chart(fig_super, use_container_width=True)
-                st.caption(_source_caption(sc_indicators))
-                save_col1, save_col2 = st.columns([2, 1])
-                with save_col1:
-                    sc_save_name = st.text_input("차트 저장 이름", value="내 자유차트", key="super_save_name")
-                with save_col2:
-                    st.write("")
-                    st.write("")
-                    if st.button("현재 차트 저장", key="super_save_button"):
-                        save_chart_settings(
-                            sc_save_name.strip() or "내 자유차트",
-                            _chart_save_payload({"time_col": sc_time_col}),
-                        )
-                        st.success("차트 설정을 저장했습니다.")
-
-        with st.expander("전세-매매 선행 신호 같이 보기"):
-            if "평균가격" in chart_src.columns and "전세_보증금평균" in chart_src.columns:
-                sc_ll = compute_lead_lag_signal(
-                    sc_plot,
-                    sale_col="평균가격",
-                    jeonse_col="전세_보증금평균",
-                    time_col=sc_time_col,
-                    max_lag=6,
-                )
-                if sc_ll.empty:
-                    st.info("선행 신호를 계산할 표본이 부족합니다.")
-                else:
-                    st.dataframe(
-                        sc_ll[["지역", "선행방향", "먼저움직인기간", "같이움직인정도", "통계신뢰도", "반복성", "요약"]]
-                        .style.format({"같이움직인정도": "{:.3f}", "통계신뢰도": "{:.1%}"}, na_rep="N/A"),
-                        use_container_width=True,
-                    )
-            else:
-                st.info("매매가격과 전세보증금 데이터가 필요합니다.")
-
-with strategy_tab:
-    bt_src = analysis_df.copy()
-    if bt_src.empty:
-        st.warning("전략검증에 사용할 데이터가 없습니다.")
-    else:
-        bt_time_col = "연월" if freq == "월별" and "연월" in bt_src.columns else "연도"
-        bt_lead = compute_lead_lag_signal(
-            bt_src,
-            sale_col="평균가격",
-            jeonse_col="전세_보증금평균",
-            time_col=bt_time_col,
-            max_lag=6,
-        ) if "평균가격" in bt_src.columns and "전세_보증금평균" in bt_src.columns else pd.DataFrame()
-        bt_work = prepare_screener_dataset(bt_src, lead_lag_df=bt_lead, time_col=bt_time_col)
-        # 최신 스냅샷 조건뿐 아니라 과거 전체 행 조건도 검증할 수 있도록 선행 신호는 지역별로 붙인다.
-        if not bt_lead.empty and "지역" in bt_lead.columns:
-            bt_src = bt_src.merge(
-                bt_lead[["지역", "선행방향", "먼저움직인기간", "반복성"]],
-                left_on="시도",
-                right_on="지역",
-                how="left",
-            )
-        period = 12 if bt_time_col == "연월" else 1
-        for col, new_col in [("평균가격", "가격_YoY"), ("거래량", "거래량_YoY"), ("전세가율", "전세가율_변화"), ("갭비용", "갭비용_변화")]:
-            if col in bt_src.columns:
-                bt_src[new_col] = bt_src.groupby("시도")[col].pct_change(period) * 100
-
-        st.subheader("조건 만들기")
-        bt_cols = _numeric_rule_columns(bt_src) + [c for c in ["선행방향", "반복성"] if c in bt_src.columns]
-        bt_defaults = [
-            {"column": "PIR", "op": "<", "value": "15"} if "PIR" in bt_cols else None,
-            {"column": "전세가율", "op": ">", "value": "60"} if "전세가율" in bt_cols else None,
-            {"column": "선행방향", "op": "==", "value": "전세 선행"} if "선행방향" in bt_cols else None,
-        ]
-        bt_defaults = [r for r in bt_defaults if r]
-        bt_rules, bt_combine = _render_condition_builder("bt", bt_cols, default_rules=bt_defaults)
-        with st.expander("조건 저장", expanded=False):
-            bt_condition_name = st.text_input("조건 이름", value="전략검증 조건", key="bt_condition_name")
-            if st.button("현재 조건 저장", key="bt_save_condition"):
-                if bt_rules:
-                    save_condition_set(bt_condition_name.strip() or "전략검증 조건", bt_rules, bt_combine)
-                    st.success("조건을 저장했습니다.")
-                else:
-                    st.warning("저장할 조건이 없습니다.")
-
-        bt_h1, bt_h2, bt_h3, bt_h4, bt_h5 = st.columns(5)
-        with bt_h1:
-            bt_price_col = _render_indicator_picker(
-                "성과 기준 가격",
-                bt_src,
-                "bt_price_col",
-                groups=["가격"],
-                default="평균가격",
-                allow_extra_numeric=False,
-            )
-        with bt_h2:
-            bt_horizons = st.multiselect("확인 기간", [3, 6, 12, 24], default=[6, 12, 24], key="bt_horizons")
-        with bt_h3:
-            bt_group = st.selectbox("검증 단위", ["시도"], key="bt_group")
-        with bt_h4:
-            bt_cooldown = st.number_input(
-                "중복 신호 쉬는 기간",
-                min_value=0,
-                max_value=36,
-                value=6 if bt_time_col == "연월" else 1,
-                step=1,
-                key="bt_cooldown",
-                help="한 번 진입 신호가 켜진 뒤 지정 기간 안의 반복 신호는 같은 매수 기회로 보고 제외합니다.",
-            )
-        with bt_h5:
-            bt_success_threshold = st.number_input(
-                "성공 기준 수익률(%)",
-                value=0.0,
-                step=0.5,
-                key="bt_success_threshold",
-                help="성공률은 진입 신호 이후 선택 기간 수익률이 이 값을 초과한 비율입니다.",
-            )
-        st.caption("최대하락폭은 신호별 선택 기간 수익률 중 가장 낮은 값을 지역별로 다시 최저 집계한 값입니다.")
-
-        if st.button("전략검증 실행", key="bt_run", type="primary"):
-            if not bt_rules:
-                st.warning("조건을 1개 이상 켜세요.")
-            else:
-                signals, summary = run_region_backtest(
+                        st.warning("저장할 조건이 없습니다.")
+    
+            bt_h1, bt_h2, bt_h3, bt_h4, bt_h5 = st.columns(5)
+            with bt_h1:
+                bt_price_col = _render_indicator_picker(
+                    "성과 기준 가격",
                     bt_src,
-                    bt_rules,
-                    combine=bt_combine,
-                    price_col=bt_price_col,
-                    group_col=bt_group,
-                    time_col=bt_time_col,
-                    horizons=tuple(bt_horizons or [6, 12]),
-                    cooldown_periods=int(bt_cooldown),
-                    success_threshold=float(bt_success_threshold),
+                    "bt_price_col",
+                    groups=["가격"],
+                    default="평균가격",
+                    allow_extra_numeric=False,
                 )
-                if summary.empty:
-                    st.info("조건을 만족한 과거 시점이 없거나 이후 수익률을 계산할 데이터가 부족합니다.")
+            with bt_h2:
+                bt_horizons = st.multiselect("확인 기간", [3, 6, 12, 24], default=[6, 12, 24], key="bt_horizons")
+            with bt_h3:
+                bt_group = st.selectbox("검증 단위", ["시도"], key="bt_group")
+            with bt_h4:
+                bt_cooldown = st.number_input(
+                    "중복 신호 쉬는 기간",
+                    min_value=0,
+                    max_value=36,
+                    value=6 if bt_time_col == "연월" else 1,
+                    step=1,
+                    key="bt_cooldown",
+                    help="한 번 진입 신호가 켜진 뒤 지정 기간 안의 반복 신호는 같은 매수 기회로 보고 제외합니다.",
+                )
+            with bt_h5:
+                bt_success_threshold = st.number_input(
+                    "성공 기준 수익률(%)",
+                    value=0.0,
+                    step=0.5,
+                    key="bt_success_threshold",
+                    help="성공률은 진입 신호 이후 선택 기간 수익률이 이 값을 초과한 비율입니다.",
+                )
+            st.caption("최대하락폭은 신호별 선택 기간 수익률 중 가장 낮은 값을 지역별로 다시 최저 집계한 값입니다.")
+    
+            if st.button("전략검증 실행", key="bt_run", type="primary"):
+                if not bt_rules:
+                    st.warning("조건을 1개 이상 켜세요.")
                 else:
-                    st.subheader("지역별 검증 결과")
-                    fmt = {c: "{:.1f}%" for c in summary.columns if "수익률" in c or "성공률" in c or c == "최대하락폭"}
-                    st.dataframe(summary.style.format(fmt, na_rep="N/A"), use_container_width=True, height=320)
-                    st.subheader("진입 신호 상세")
-                    sig_fmt = {c: "{:.1f}%" for c in signals.columns if c.endswith("수익률")}
-                    st.dataframe(signals.style.format(sig_fmt, na_rep="N/A"), use_container_width=True, height=320)
-
-with main_tab6:
+                    signals, summary = run_region_backtest(
+                        bt_src,
+                        bt_rules,
+                        combine=bt_combine,
+                        price_col=bt_price_col,
+                        group_col=bt_group,
+                        time_col=bt_time_col,
+                        horizons=tuple(bt_horizons or [6, 12]),
+                        cooldown_periods=int(bt_cooldown),
+                        success_threshold=float(bt_success_threshold),
+                    )
+                    if summary.empty:
+                        st.info("조건을 만족한 과거 시점이 없거나 이후 수익률을 계산할 데이터가 부족합니다.")
+                    else:
+                        st.subheader("지역별 검증 결과")
+                        fmt = {c: "{:.1f}%" for c in summary.columns if "수익률" in c or "성공률" in c or c == "최대하락폭"}
+                        st.dataframe(summary.style.format(fmt, na_rep="N/A"), use_container_width=True, height=320)
+                        st.subheader("진입 신호 상세")
+                        sig_fmt = {c: "{:.1f}%" for c in signals.columns if c.endswith("수익률")}
+                        st.dataframe(signals.style.format(sig_fmt, na_rep="N/A"), use_container_width=True, height=320)
+    
+if main_tab6:
     past_tab, stat_verify_tab = st.tabs(["과거분석", "통계검증"])
 
-with past_tab:
-    st.header("과거분석: 역사는 반복된다")
-    st.caption("과거에 가격이 오르고 내렸던 국면을 찾고, 수요·공급·금융 지표가 몇 년 앞서 움직였는지 가설을 만든 뒤 검증합니다.")
-
-    _past_src = yearly_df.copy()
-    if selected_sido and "시도" in _past_src.columns:
-        _past_src = _past_src[_past_src["시도"].isin(selected_sido)]
-
-    if _past_src.empty or "연도" not in _past_src.columns or "평균가격" not in _past_src.columns:
-        st.warning("과거분석에 필요한 연간 가격 데이터가 없습니다.")
-    else:
-        _past_numeric = [
-            c for c in _past_src.columns
-            if c not in ("연도", "월", "연월", "시도", "지역코드")
-            and pd.api.types.is_numeric_dtype(_past_src[c])
-            and _past_src[c].notna().any()
-        ]
-        _driver_defaults = [
-            c for c in [
-                "총인구", "30대", "NPS_가입자수", "NPS_고용증감", "가구_소득평균",
-                "인허가_호수", "착공_호수", "준공_호수", "미분양_평균",
-                "전세가율", "PIR", "PIR_NPS", "갭비용", "기준금리", "주담대_증감률",
+    with past_tab:
+        st.header("과거분석: 역사는 반복된다")
+        st.caption("과거에 가격이 오르고 내렸던 국면을 찾고, 수요·공급·금융 지표가 몇 년 앞서 움직였는지 가설을 만든 뒤 검증합니다.")
+    
+        _past_src = yearly_df.copy()
+        if selected_sido and "시도" in _past_src.columns:
+            _past_src = _past_src[_past_src["시도"].isin(selected_sido)]
+    
+        if _past_src.empty or "연도" not in _past_src.columns or "평균가격" not in _past_src.columns:
+            st.warning("과거분석에 필요한 연간 가격 데이터가 없습니다.")
+        else:
+            _past_numeric = [
+                c for c in _past_src.columns
+                if c not in ("연도", "월", "연월", "시도", "지역코드")
+                and pd.api.types.is_numeric_dtype(_past_src[c])
+                and _past_src[c].notna().any()
             ]
-            if c in _past_numeric
-        ]
-
-        _past_c1, _past_c2, _past_c3, _past_c4 = st.columns(4)
-        with _past_c1:
-            _past_sido_options = sorted(_past_src["시도"].dropna().unique()) if "시도" in _past_src.columns else []
-            _past_sido = st.selectbox(
-                "검증 지역",
-                _past_sido_options,
-                index=_past_sido_options.index("서울") if "서울" in _past_sido_options else 0,
-                key="past_sido",
-            ) if _past_sido_options else None
-        with _past_c2:
-            _past_lag = st.select_slider("선행 시차", options=[0, 1, 2, 3], value=1, key="past_lag")
-        with _past_c3:
-            _past_rise_th = st.number_input("상승 국면 기준(%)", value=5.0, step=0.5, key="past_rise_th")
-        with _past_c4:
-            _past_fall_th = st.number_input("하락 국면 기준(%)", value=-3.0, step=0.5, key="past_fall_th")
-
-        _hypothesis_vars = st.multiselect(
-            "검증할 원인 후보",
-            options=[c for c in _past_numeric if c != "평균가격"],
-            default=_driver_defaults[:8],
-            key="past_hypothesis_vars",
-            format_func=_fmt_var_by_col,
-        )
-
-        if _past_sido and _hypothesis_vars:
-            _one = _past_src[_past_src["시도"] == _past_sido].sort_values("연도").copy()
-            _one["가격변화율"] = _one["평균가격"].pct_change() * 100
-            _one["국면"] = np.select(
-                [_one["가격변화율"] >= _past_rise_th, _one["가격변화율"] <= _past_fall_th],
-                ["상승기", "하락기"],
-                default="중립기",
+            _driver_defaults = [
+                c for c in [
+                    "총인구", "30대", "NPS_가입자수", "NPS_고용증감", "가구_소득평균",
+                    "인허가_호수", "착공_호수", "준공_호수", "미분양_평균",
+                    "전세가율", "PIR", "PIR_NPS", "갭비용", "기준금리", "주담대_증감률",
+                ]
+                if c in _past_numeric
+            ]
+    
+            _past_c1, _past_c2, _past_c3, _past_c4 = st.columns(4)
+            with _past_c1:
+                _past_sido_options = sorted(_past_src["시도"].dropna().unique()) if "시도" in _past_src.columns else []
+                _past_sido = st.selectbox(
+                    "검증 지역",
+                    _past_sido_options,
+                    index=_past_sido_options.index("서울") if "서울" in _past_sido_options else 0,
+                    key="past_sido",
+                ) if _past_sido_options else None
+            with _past_c2:
+                _past_lag = st.select_slider("선행 시차", options=[0, 1, 2, 3], value=1, key="past_lag")
+            with _past_c3:
+                _past_rise_th = st.number_input("상승 국면 기준(%)", value=5.0, step=0.5, key="past_rise_th")
+            with _past_c4:
+                _past_fall_th = st.number_input("하락 국면 기준(%)", value=-3.0, step=0.5, key="past_fall_th")
+    
+            _hypothesis_vars = st.multiselect(
+                "검증할 원인 후보",
+                options=[c for c in _past_numeric if c != "평균가격"],
+                default=_driver_defaults[:8],
+                key="past_hypothesis_vars",
+                format_func=_fmt_var_by_col,
             )
-
-            _rank_rows = []
-            for _var in _hypothesis_vars:
-                if _var not in _one.columns:
-                    continue
-                _test = _one[["연도", "가격변화율", _var]].copy()
-                _test[f"{_var}_선행"] = _test[_var].shift(_past_lag)
-                _test[f"{_var}_변화율_선행"] = _test[_var].pct_change().shift(_past_lag) * 100
-                for _signal_col, _kind in [(f"{_var}_선행", "레벨"), (f"{_var}_변화율_선행", "변화율")]:
-                    _valid = _test[["가격변화율", _signal_col]].replace([np.inf, -np.inf], np.nan).dropna()
-                    if len(_valid) >= 4 and _valid[_signal_col].nunique() > 1:
-                        _corr = _valid["가격변화율"].corr(_valid[_signal_col])
-                        _rank_rows.append({
-                            "원인후보": _var,
-                            "신호": _kind,
-                            "시차": _past_lag,
-                            "상관계수": _corr,
-                            "검증표본": len(_valid),
-                            "가설": f"{_past_sido}에서 {_var} {_kind}이(가) {_past_lag}년 선행하면 가격변화율이 {'같은 방향' if _corr >= 0 else '반대 방향'}으로 움직였을 가능성",
-                        })
-
-            _rank_df = pd.DataFrame(_rank_rows)
-            if _rank_df.empty:
-                st.info("선택한 변수와 시차로 검증 가능한 표본이 부족합니다.")
-            else:
-                _rank_df["설명력"] = _rank_df["상관계수"].abs()
-                _rank_df = _rank_df.sort_values("설명력", ascending=False).reset_index(drop=True)
-                _best = _rank_df.iloc[0]
-
-                st.subheader("자동 가설")
-                st.info(_best["가설"])
-
-                _sel_c1, _sel_c2 = st.columns(2)
-                with _sel_c1:
-                    _selected_driver = st.selectbox(
-                        "상세 검증 변수",
-                        _rank_df["원인후보"].drop_duplicates().tolist(),
-                        key="past_selected_driver",
-                        format_func=_fmt_var_by_col,
-                    )
-                with _sel_c2:
-                    _selected_signal = st.selectbox("신호 형태", ["변화율", "레벨"], key="past_selected_signal")
-
-                _signal_col = f"{_selected_driver}_변화율_선행" if _selected_signal == "변화율" else f"{_selected_driver}_선행"
-                _plot_df = _one[["연도", "평균가격", "가격변화율", "국면", _selected_driver]].copy()
-                _plot_df[f"{_selected_driver}_선행"] = _plot_df[_selected_driver].shift(_past_lag)
-                _plot_df[f"{_selected_driver}_변화율_선행"] = _plot_df[_selected_driver].pct_change().shift(_past_lag) * 100
-
-                _verify = _plot_df[["연도", "가격변화율", "국면", _signal_col]].replace([np.inf, -np.inf], np.nan).dropna()
-                if len(_verify) >= 4:
-                    _corr_val = _verify["가격변화율"].corr(_verify[_signal_col])
-                    _v1, _v2, _v3 = st.columns(3)
-                    _v1.metric("검증 상관계수", f"{_corr_val:.3f}")
-                    _v2.metric("표본 수", f"{len(_verify)}년")
-                    _v3.metric("방향", "같은 방향" if _corr_val >= 0 else "반대 방향")
-
-                    fig_hyp = px.scatter(
-                        _verify,
-                        x=_signal_col,
-                        y="가격변화율",
-                        color="국면",
-                        text="연도",
-                        trendline="ols" if len(_verify) >= 5 else None,
-                        title=f"{_past_sido}: {_selected_driver} {_selected_signal} {_past_lag}년 선행 vs 가격변화율",
-                        labels={_signal_col: f"{_selected_driver} {_selected_signal}({_past_lag}년 선행)", "가격변화율": "가격변화율(%)"},
-                        color_discrete_map={"상승기": "#ef4444", "하락기": "#2563eb", "중립기": "#64748b"},
-                    )
-                    fig_hyp.update_traces(textposition="top center")
-                    fig_hyp.add_hline(y=0, line_dash="dash", line_color="gray")
-                    register_fig("과거가설_검증산점도", fig_hyp, "적정값가상계산")
-                    st.plotly_chart(fig_hyp, use_container_width=True)
-
-                _episode_cols = ["연도", "국면", "평균가격", "가격변화율", _selected_driver, f"{_selected_driver}_변화율_선행"]
-                st.subheader("반복 국면 테이블")
-                st.dataframe(
-                    _plot_df[[c for c in _episode_cols if c in _plot_df.columns]]
-                    .sort_values("연도", ascending=False)
-                    .style.format({c: "{:,.2f}" for c in _episode_cols if c not in ["연도", "국면"]}, na_rep="N/A"),
-                    use_container_width=True,
-                    height=320,
+    
+            if _past_sido and _hypothesis_vars:
+                _one = _past_src[_past_src["시도"] == _past_sido].sort_values("연도").copy()
+                _one["가격변화율"] = _one["평균가격"].pct_change() * 100
+                _one["국면"] = np.select(
+                    [_one["가격변화율"] >= _past_rise_th, _one["가격변화율"] <= _past_fall_th],
+                    ["상승기", "하락기"],
+                    default="중립기",
                 )
-
-                with st.expander("원인 후보별 검증 순위"):
+    
+                _rank_rows = []
+                for _var in _hypothesis_vars:
+                    if _var not in _one.columns:
+                        continue
+                    _test = _one[["연도", "가격변화율", _var]].copy()
+                    _test[f"{_var}_선행"] = _test[_var].shift(_past_lag)
+                    _test[f"{_var}_변화율_선행"] = _test[_var].pct_change().shift(_past_lag) * 100
+                    for _signal_col, _kind in [(f"{_var}_선행", "레벨"), (f"{_var}_변화율_선행", "변화율")]:
+                        _valid = _test[["가격변화율", _signal_col]].replace([np.inf, -np.inf], np.nan).dropna()
+                        if len(_valid) >= 4 and _valid[_signal_col].nunique() > 1:
+                            _corr = _valid["가격변화율"].corr(_valid[_signal_col])
+                            _rank_rows.append({
+                                "원인후보": _var,
+                                "신호": _kind,
+                                "시차": _past_lag,
+                                "상관계수": _corr,
+                                "검증표본": len(_valid),
+                                "가설": f"{_past_sido}에서 {_var} {_kind}이(가) {_past_lag}년 선행하면 가격변화율이 {'같은 방향' if _corr >= 0 else '반대 방향'}으로 움직였을 가능성",
+                            })
+    
+                _rank_df = pd.DataFrame(_rank_rows)
+                if _rank_df.empty:
+                    st.info("선택한 변수와 시차로 검증 가능한 표본이 부족합니다.")
+                else:
+                    _rank_df["설명력"] = _rank_df["상관계수"].abs()
+                    _rank_df = _rank_df.sort_values("설명력", ascending=False).reset_index(drop=True)
+                    _best = _rank_df.iloc[0]
+    
+                    st.subheader("자동 가설")
+                    st.info(_best["가설"])
+    
+                    _sel_c1, _sel_c2 = st.columns(2)
+                    with _sel_c1:
+                        _selected_driver = st.selectbox(
+                            "상세 검증 변수",
+                            _rank_df["원인후보"].drop_duplicates().tolist(),
+                            key="past_selected_driver",
+                            format_func=_fmt_var_by_col,
+                        )
+                    with _sel_c2:
+                        _selected_signal = st.selectbox("신호 형태", ["변화율", "레벨"], key="past_selected_signal")
+    
+                    _signal_col = f"{_selected_driver}_변화율_선행" if _selected_signal == "변화율" else f"{_selected_driver}_선행"
+                    _plot_df = _one[["연도", "평균가격", "가격변화율", "국면", _selected_driver]].copy()
+                    _plot_df[f"{_selected_driver}_선행"] = _plot_df[_selected_driver].shift(_past_lag)
+                    _plot_df[f"{_selected_driver}_변화율_선행"] = _plot_df[_selected_driver].pct_change().shift(_past_lag) * 100
+    
+                    _verify = _plot_df[["연도", "가격변화율", "국면", _signal_col]].replace([np.inf, -np.inf], np.nan).dropna()
+                    if len(_verify) >= 4:
+                        _corr_val = _verify["가격변화율"].corr(_verify[_signal_col])
+                        _v1, _v2, _v3 = st.columns(3)
+                        _v1.metric("검증 상관계수", f"{_corr_val:.3f}")
+                        _v2.metric("표본 수", f"{len(_verify)}년")
+                        _v3.metric("방향", "같은 방향" if _corr_val >= 0 else "반대 방향")
+    
+                        fig_hyp = px.scatter(
+                            _verify,
+                            x=_signal_col,
+                            y="가격변화율",
+                            color="국면",
+                            text="연도",
+                            trendline="ols" if len(_verify) >= 5 else None,
+                            title=f"{_past_sido}: {_selected_driver} {_selected_signal} {_past_lag}년 선행 vs 가격변화율",
+                            labels={_signal_col: f"{_selected_driver} {_selected_signal}({_past_lag}년 선행)", "가격변화율": "가격변화율(%)"},
+                            color_discrete_map={"상승기": "#ef4444", "하락기": "#2563eb", "중립기": "#64748b"},
+                        )
+                        fig_hyp.update_traces(textposition="top center")
+                        fig_hyp.add_hline(y=0, line_dash="dash", line_color="gray")
+                        register_fig("과거가설_검증산점도", fig_hyp, "적정값가상계산")
+                        st.plotly_chart(fig_hyp, use_container_width=True)
+    
+                    _episode_cols = ["연도", "국면", "평균가격", "가격변화율", _selected_driver, f"{_selected_driver}_변화율_선행"]
+                    st.subheader("반복 국면 테이블")
                     st.dataframe(
-                        _rank_df[["원인후보", "신호", "시차", "상관계수", "검증표본", "가설"]]
-                        .style.format({"상관계수": "{:.3f}"}),
+                        _plot_df[[c for c in _episode_cols if c in _plot_df.columns]]
+                        .sort_values("연도", ascending=False)
+                        .style.format({c: "{:,.2f}" for c in _episode_cols if c not in ["연도", "국면"]}, na_rep="N/A"),
                         use_container_width=True,
                         height=320,
                     )
+    
+                    with st.expander("원인 후보별 검증 순위"):
+                        st.dataframe(
+                            _rank_df[["원인후보", "신호", "시차", "상관계수", "검증표본", "가설"]]
+                            .style.format({"상관계수": "{:.3f}"}),
+                            use_container_width=True,
+                            height=320,
+                        )
+            else:
+                st.info("검증 지역과 원인 후보를 선택하세요.")
+    
+    with stat_verify_tab:
+        sub_reg, sub_outlier, sub_corr = st.tabs(["회귀분석", "이상치 탐지", "상관관계 분석"])
+    
+    with sub_reg:
+        st.header("다중회귀 분석")
+    
+        if analysis_df.empty:
+            st.warning("데이터가 없습니다.")
         else:
-            st.info("검증 지역과 원인 후보를 선택하세요.")
-
-with stat_verify_tab:
-    sub_reg, sub_outlier, sub_corr = st.tabs(["회귀분석", "이상치 탐지", "상관관계 분석"])
-
-with sub_reg:
-    st.header("다중회귀 분석")
-
-    if analysis_df.empty:
-        st.warning("데이터가 없습니다.")
-    else:
-        valid_num = [v for v in available_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
-
-        col_y, col_x = st.columns([1, 2])
-        with col_y:
-            reg_y = st.selectbox("종속변수 (Y)", [v for v in result_vars if v in valid_num], key="reg_y", format_func=_fmt_var_by_col)
-        with col_x:
-            reg_x_candidates = [v for v in valid_num if v != reg_y]
-            reg_x = st.multiselect("독립변수 (X)", reg_x_candidates,
-                                    default=reg_x_candidates[:3] if len(reg_x_candidates) >= 3 else reg_x_candidates,
-                                    key="reg_x",
-                                    format_func=_fmt_var_by_col)
-
-        if reg_x and reg_y:
-            try:
-                summary_df, importance_df, r2, adj_r2 = multiple_regression(analysis_df, reg_y, reg_x)
-
-                # KPI
-                cols = st.columns(3)
-                cols[0].metric("R²", f"{r2:.4f}")
-                cols[1].metric("Adjusted R²", f"{adj_r2:.4f}")
-                cols[2].metric("독립변수 수", len(reg_x))
-
-                # 계수 테이블
-                st.subheader("회귀 계수")
-                st.dataframe(summary_df.style.format({
-                    "계수": "{:.6f}", "표준오차": "{:.6f}", "t값": "{:.4f}", "p값": "{:.4f}"
-                }), use_container_width=True)
-
-                # 변수 중요도 차트
-                st.subheader("변수 중요도 (표준화 계수)")
-                fig_imp = px.bar(importance_df, x="변수", y="중요도", color="중요도",
-                                 color_continuous_scale="Blues", title="변수별 영향력")
-                register_fig("회귀_변수중요도", fig_imp, "통계분석")
-                st.plotly_chart(fig_imp, use_container_width=True)
-
-            except (ValueError, ImportError) as e:
-                st.error(str(e))
+            valid_num = [v for v in available_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
+    
+            col_y, col_x = st.columns([1, 2])
+            with col_y:
+                reg_y = st.selectbox("종속변수 (Y)", [v for v in result_vars if v in valid_num], key="reg_y", format_func=_fmt_var_by_col)
+            with col_x:
+                reg_x_candidates = [v for v in valid_num if v != reg_y]
+                reg_x = st.multiselect("독립변수 (X)", reg_x_candidates,
+                                        default=reg_x_candidates[:3] if len(reg_x_candidates) >= 3 else reg_x_candidates,
+                                        key="reg_x",
+                                        format_func=_fmt_var_by_col)
+    
+            if reg_x and reg_y:
+                try:
+                    summary_df, importance_df, r2, adj_r2 = multiple_regression(analysis_df, reg_y, reg_x)
+    
+                    # KPI
+                    cols = st.columns(3)
+                    cols[0].metric("R²", f"{r2:.4f}")
+                    cols[1].metric("Adjusted R²", f"{adj_r2:.4f}")
+                    cols[2].metric("독립변수 수", len(reg_x))
+    
+                    # 계수 테이블
+                    st.subheader("회귀 계수")
+                    st.dataframe(summary_df.style.format({
+                        "계수": "{:.6f}", "표준오차": "{:.6f}", "t값": "{:.4f}", "p값": "{:.4f}"
+                    }), use_container_width=True)
+    
+                    # 변수 중요도 차트
+                    st.subheader("변수 중요도 (표준화 계수)")
+                    fig_imp = px.bar(importance_df, x="변수", y="중요도", color="중요도",
+                                     color_continuous_scale="Blues", title="변수별 영향력")
+                    register_fig("회귀_변수중요도", fig_imp, "통계분석")
+                    st.plotly_chart(fig_imp, use_container_width=True)
+    
+                except (ValueError, ImportError) as e:
+                    st.error(str(e))
+            else:
+                st.info("독립변수를 1개 이상 선택하세요.")
+    
+    
+    # ── 이상치 탐지 서브탭 ──────────────────────────────────────────────
+    with sub_outlier:
+        st.header("이상치 탐지")
+    
+        if analysis_df.empty:
+            st.warning("데이터가 없습니다.")
         else:
-            st.info("독립변수를 1개 이상 선택하세요.")
-
-
-# ── 이상치 탐지 서브탭 ──────────────────────────────────────────────
-with sub_outlier:
-    st.header("이상치 탐지")
-
-    if analysis_df.empty:
-        st.warning("데이터가 없습니다.")
-    else:
-        valid_num = [v for v in available_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            outlier_var = st.selectbox("분석 변수", valid_num, key="outlier_var", format_func=_fmt_var_by_col)
-        with col2:
-            outlier_method = st.selectbox("탐지 방법", ["zscore", "iqr"], key="outlier_method")
-        with col3:
-            outlier_threshold = st.slider("임계값 (Z-score)", 1.5, 4.0, 2.5, 0.1, key="outlier_th")
-
-        outlier_df = detect_outliers(analysis_df, outlier_var, method=outlier_method, threshold=outlier_threshold)
-        outlier_count = outlier_df["이상치"].sum()
-
-        st.metric("탐지된 이상치 수", f"{outlier_count}건 / {len(outlier_df)}건")
-
-        if outlier_count > 0:
-            # 이상치 표시 산점도
-            time_col_7 = "연월" if freq == "월별" and "연월" in outlier_df.columns else "연도"
-            fig_outlier = px.scatter(
-                outlier_df, x=time_col_7, y=outlier_var, color="이상치",
-                color_discrete_map={True: "red", False: "lightgray"},
-                hover_data=["시도", "z_score"],
-                title=f"{outlier_var} 이상치 분포",
-            )
-            register_fig("이상치_산점도", fig_outlier, "통계분석")
-            st.plotly_chart(fig_outlier, use_container_width=True)
-
-            # 이상치 상세 테이블
-            st.subheader("이상치 상세")
-            outlier_detail = outlier_df[outlier_df["이상치"]].copy()
-            display_cols = [c for c in ["시도", time_col_7, outlier_var, "z_score"] if c in outlier_detail.columns]
-            st.dataframe(
-                outlier_detail[display_cols].sort_values("z_score", key=abs, ascending=False),
-                use_container_width=True,
-            )
-        else:
-            st.success("이상치가 탐지되지 않았습니다.")
-
-
-# ── 상관관계 분석 서브탭 (Tab 2에서 이동) ───────────────────────────
-with sub_corr:
-    st.header(f"상관관계 분석 ({mode_label})")
-
-    if analysis_df.empty:
-        st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
-    else:
-        # 실제 데이터에 존재하는 변수만 필터
-        valid_vars = [v for v in available_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
-
-        # 히트맵
-        st.subheader("상관계수 히트맵")
-        corr, pval = correlation_matrix(analysis_df, valid_vars)
-        if not corr.empty:
-            fig_heatmap = px.imshow(
-                corr, text_auto=".2f",
-                color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
-                title="변수 간 피어슨 상관계수",
-                labels={"color": "상관계수"},
-            )
-            fig_heatmap.update_layout(width=700, height=600)
-            register_fig("상관관계_히트맵", fig_heatmap, "통계분석")
-            st.plotly_chart(fig_heatmap, use_container_width=True)
-
-            with st.expander("통계 신뢰도 상세"):
-                confidence = 1 - pval
-                st.dataframe(confidence.style.format("{:.1%}"))
-        else:
-            st.info("상관계수를 계산할 데이터가 부족합니다.")
-
-        # 산점도
-        st.subheader("산점도 분석")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            default_x = valid_vars.index("GRDP") if "GRDP" in valid_vars else 0
-            x_var = st.selectbox("X축 변수", valid_vars, index=default_x, key="corr_x_var", format_func=_fmt_var_by_col)
-        with col_b:
-            y_var = st.selectbox("Y축 변수", valid_vars, index=0, key="corr_y_var", format_func=_fmt_var_by_col)
-
-        scatter_df, slope, intercept, r_sq = scatter_analysis(analysis_df, x_var, y_var)
-        if not scatter_df.empty:
-            fig_scatter = px.scatter(
-                scatter_df, x=x_var, y=y_var, color="시도",
-                title=f"{x_var} vs {y_var}",
-                trendline="ols" if len(scatter_df) >= 3 else None,
-            )
-            if r_sq is not None:
-                fig_scatter.add_annotation(
-                    text=f"R² = {r_sq:.4f}",
-                    xref="paper", yref="paper",
-                    x=0.02, y=0.98, showarrow=False, font=dict(size=14),
+            valid_num = [v for v in available_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
+    
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                outlier_var = st.selectbox("분석 변수", valid_num, key="outlier_var", format_func=_fmt_var_by_col)
+            with col2:
+                outlier_method = st.selectbox("탐지 방법", ["zscore", "iqr"], key="outlier_method")
+            with col3:
+                outlier_threshold = st.slider("임계값 (Z-score)", 1.5, 4.0, 2.5, 0.1, key="outlier_th")
+    
+            outlier_df = detect_outliers(analysis_df, outlier_var, method=outlier_method, threshold=outlier_threshold)
+            outlier_count = outlier_df["이상치"].sum()
+    
+            st.metric("탐지된 이상치 수", f"{outlier_count}건 / {len(outlier_df)}건")
+    
+            if outlier_count > 0:
+                # 이상치 표시 산점도
+                time_col_7 = "연월" if freq == "월별" and "연월" in outlier_df.columns else "연도"
+                fig_outlier = px.scatter(
+                    outlier_df, x=time_col_7, y=outlier_var, color="이상치",
+                    color_discrete_map={True: "red", False: "lightgray"},
+                    hover_data=["시도", "z_score"],
+                    title=f"{outlier_var} 이상치 분포",
                 )
-            register_fig("상관_산점도", fig_scatter, "통계분석")
-            st.plotly_chart(fig_scatter, use_container_width=True)
-
-        # 시도별 상관계수
-        st.subheader("시도별 상관계수")
-        region_corr = correlation_by_region(yearly_df[yearly_df["연도"].between(*selected_years)], x_var, y_var)
-        if not region_corr.empty:
-            fig_bar = px.bar(
-                region_corr, x="시도", y="상관계수",
-                color="상관계수", color_continuous_scale="RdBu_r", range_color=[-1, 1],
-                title=f"시도별 {x_var}-{y_var} 상관계수",
-            )
-            register_fig("시도별_상관계수", fig_bar, "통계분석")
-            st.plotly_chart(fig_bar, use_container_width=True)
-            st.dataframe(region_corr)
-
-        # 기간별 상관계수 추이
-        st.subheader("연도별 상관계수 추이")
-        period_corr = correlation_by_period(yearly_df, x_var, y_var)
-        if not period_corr.empty:
-            fig_period = px.line(
-                period_corr, x="연도", y="상관계수",
-                title=f"연도별 {x_var}-{y_var} 상관계수 추이", markers=True,
-            )
-            fig_period.add_hline(y=0, line_dash="dash", line_color="gray")
-            register_fig("연도별_상관계수", fig_period, "통계분석")
-            st.plotly_chart(fig_period, use_container_width=True)
-
-
-# ============================
-# Tab 7: 고급분석 (클러스터링 + Granger)
-# ============================
-with main_tab7:
+                register_fig("이상치_산점도", fig_outlier, "통계분석")
+                st.plotly_chart(fig_outlier, use_container_width=True)
+    
+                # 이상치 상세 테이블
+                st.subheader("이상치 상세")
+                outlier_detail = outlier_df[outlier_df["이상치"]].copy()
+                display_cols = [c for c in ["시도", time_col_7, outlier_var, "z_score"] if c in outlier_detail.columns]
+                st.dataframe(
+                    outlier_detail[display_cols].sort_values("z_score", key=abs, ascending=False),
+                    use_container_width=True,
+                )
+            else:
+                st.success("이상치가 탐지되지 않았습니다.")
+    
+    
+    # ── 상관관계 분석 서브탭 (Tab 2에서 이동) ───────────────────────────
+    with sub_corr:
+        st.header(f"상관관계 분석 ({mode_label})")
+    
+        if analysis_df.empty:
+            st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
+        else:
+            # 실제 데이터에 존재하는 변수만 필터
+            valid_vars = [v for v in available_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
+    
+            # 히트맵
+            st.subheader("상관계수 히트맵")
+            corr, pval = correlation_matrix(analysis_df, valid_vars)
+            if not corr.empty:
+                fig_heatmap = px.imshow(
+                    corr, text_auto=".2f",
+                    color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
+                    title="변수 간 피어슨 상관계수",
+                    labels={"color": "상관계수"},
+                )
+                fig_heatmap.update_layout(width=700, height=600)
+                register_fig("상관관계_히트맵", fig_heatmap, "통계분석")
+                st.plotly_chart(fig_heatmap, use_container_width=True)
+    
+                with st.expander("통계 신뢰도 상세"):
+                    confidence = 1 - pval
+                    st.dataframe(confidence.style.format("{:.1%}"))
+            else:
+                st.info("상관계수를 계산할 데이터가 부족합니다.")
+    
+            # 산점도
+            st.subheader("산점도 분석")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                default_x = valid_vars.index("GRDP") if "GRDP" in valid_vars else 0
+                x_var = st.selectbox("X축 변수", valid_vars, index=default_x, key="corr_x_var", format_func=_fmt_var_by_col)
+            with col_b:
+                y_var = st.selectbox("Y축 변수", valid_vars, index=0, key="corr_y_var", format_func=_fmt_var_by_col)
+    
+            scatter_df, slope, intercept, r_sq = scatter_analysis(analysis_df, x_var, y_var)
+            if not scatter_df.empty:
+                fig_scatter = px.scatter(
+                    scatter_df, x=x_var, y=y_var, color="시도",
+                    title=f"{x_var} vs {y_var}",
+                    trendline="ols" if len(scatter_df) >= 3 else None,
+                )
+                if r_sq is not None:
+                    fig_scatter.add_annotation(
+                        text=f"R² = {r_sq:.4f}",
+                        xref="paper", yref="paper",
+                        x=0.02, y=0.98, showarrow=False, font=dict(size=14),
+                    )
+                register_fig("상관_산점도", fig_scatter, "통계분석")
+                st.plotly_chart(fig_scatter, use_container_width=True)
+    
+            # 시도별 상관계수
+            st.subheader("시도별 상관계수")
+            region_corr = correlation_by_region(yearly_df[yearly_df["연도"].between(*selected_years)], x_var, y_var)
+            if not region_corr.empty:
+                fig_bar = px.bar(
+                    region_corr, x="시도", y="상관계수",
+                    color="상관계수", color_continuous_scale="RdBu_r", range_color=[-1, 1],
+                    title=f"시도별 {x_var}-{y_var} 상관계수",
+                )
+                register_fig("시도별_상관계수", fig_bar, "통계분석")
+                st.plotly_chart(fig_bar, use_container_width=True)
+                st.dataframe(region_corr)
+    
+            # 기간별 상관계수 추이
+            st.subheader("연도별 상관계수 추이")
+            period_corr = correlation_by_period(yearly_df, x_var, y_var)
+            if not period_corr.empty:
+                fig_period = px.line(
+                    period_corr, x="연도", y="상관계수",
+                    title=f"연도별 {x_var}-{y_var} 상관계수 추이", markers=True,
+                )
+                fig_period.add_hline(y=0, line_dash="dash", line_color="gray")
+                register_fig("연도별_상관계수", fig_period, "통계분석")
+                st.plotly_chart(fig_period, use_container_width=True)
+    
+    
+    # ============================
+    # Tab 7: 고급분석 (클러스터링 + Granger)
+    # ============================
+if main_tab7:
     st.caption("**클러스터링**: 비슷한 특성의 지역을 자동으로 묶어 그룹별 특징을 파악합니다 | **선행 신호**: 특정 지표가 가격 변화를 몇 달 먼저 움직였는지 확인합니다")
     sub_cluster, sub_granger = st.tabs(["클러스터링", "선행 신호"])
 
-with sub_cluster:
-    st.header("지역 클러스터링")
-
-    if analysis_df.empty:
-        st.warning("데이터가 없습니다.")
-    else:
-        valid_num = [v for v in available_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
-
-        cluster_features = st.multiselect(
-            "클러스터링 변수", valid_num,
-            default=[v for v in [price_col, vol_col, "GRDP"] if v in valid_num][:3],
-            key="cluster_features",
-            format_func=_fmt_var_by_col,
-        )
-        n_clusters = st.slider("클러스터 수", 2, 8, 4, key="n_clusters")
-
-        if len(cluster_features) >= 2:
-            try:
-                clustered_df, centers_df = _cached_cluster_regions(analysis_df, tuple(cluster_features), n_clusters)
-
-                # 클러스터 결과 테이블
-                st.subheader("클러스터별 시도 배정")
-                st.dataframe(clustered_df, use_container_width=True)
-
-                # 클러스터 시각화 (첫 2개 변수로 산점도)
-                fig_cluster = px.scatter(
-                    clustered_df, x=cluster_features[0], y=cluster_features[1],
-                    color=clustered_df["cluster"].astype(str),
-                    text="시도", title="지역 클러스터링 결과",
-                    labels={"color": "클러스터"},
-                )
-                fig_cluster.update_traces(textposition="top center")
-                register_fig("클러스터링", fig_cluster, "고급분석")
-                st.plotly_chart(fig_cluster, use_container_width=True)
-
-                # 클러스터 중심값
-                st.subheader("클러스터 중심값")
-                st.dataframe(centers_df.style.format(
-                    {c: "{:,.2f}" for c in cluster_features}
-                ), use_container_width=True)
-
-                # 레이더 차트
-                if len(cluster_features) >= 3:
-                    st.subheader("클러스터 프로파일 (레이더 차트)")
-                    # 정규화
-                    radar_df = centers_df.copy()
-                    for c in cluster_features:
-                        vmin, vmax = radar_df[c].min(), radar_df[c].max()
-                        radar_df[c] = (radar_df[c] - vmin) / (vmax - vmin) if vmax > vmin else 0
-
-                    fig_radar = go.Figure()
-                    for _, row in radar_df.iterrows():
-                        fig_radar.add_trace(go.Scatterpolar(
-                            r=[row[c] for c in cluster_features] + [row[cluster_features[0]]],
-                            theta=cluster_features + [cluster_features[0]],
-                            name=f"클러스터 {int(row['cluster'])}",
-                        ))
-                    fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-                                            title="클러스터 프로파일")
-                    register_fig("레이더차트", fig_radar, "고급분석")
-                    st.plotly_chart(fig_radar, use_container_width=True)
-
-            except (ValueError, ImportError) as e:
-                st.error(str(e))
+    with sub_cluster:
+        st.header("지역 클러스터링")
+    
+        if analysis_df.empty:
+            st.warning("데이터가 없습니다.")
         else:
-            st.info("변수를 2개 이상 선택하세요.")
-
-
-# ============================
-# Tab 6-2: Granger 인과성 (고급분석 서브탭)
-# ============================
-with sub_granger:
-    st.header("선행 신호 반복성")
-    st.caption("한 지표가 먼저 움직인 뒤 다른 지표가 따라온 패턴이 반복됐는지 확인합니다.")
-
-    # Granger는 월별 시계열 데이터 필요
-    granger_src = filtered_monthly if not filtered_monthly.empty else monthly_df
-
-    if granger_src.empty:
-        st.warning("월별 데이터가 필요합니다.")
-    else:
-        valid_num_g = [v for v in available_vars if v in granger_src.columns and granger_src[v].notna().any()]
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            g_y = st.selectbox("나중에 움직였는지 볼 지표", [v for v in result_vars if v in valid_num_g], key="g_y", format_func=_fmt_var_by_col)
-        with col2:
-            g_x_candidates = [v for v in valid_num_g if v != g_y]
-            g_x = st.selectbox("먼저 움직였는지 볼 지표", g_x_candidates, key="g_x", format_func=_fmt_var_by_col)
-        with col3:
-            g_max_lag = st.slider("최대 몇 개월 먼저 움직였는지", 1, 12, 4, key="g_lag")
-
-        if g_y and g_x:
-            try:
-                granger_df = _cached_granger(granger_src, g_y, g_x, g_max_lag)
-
-                if granger_df.empty:
-                    st.warning("검정할 수 있는 데이터가 부족합니다.")
-                else:
-                    # 요약: 선행 패턴이 반복된 시도 수
-                    causal_sido = granger_df[granger_df["인과성"]]["시도"].nunique()
-                    total_sido = granger_df["시도"].nunique()
-                    st.metric("선행 패턴 발견 지역", f"{causal_sido} / {total_sido}")
-
-                    # 히트맵: 시도 × 기간별 통계 신뢰도
-                    pivot_g = granger_df.pivot_table(index="시도", columns="lag", values="p값", aggfunc="first")
-                    pivot_conf = 1 - pivot_g
-                    fig_g = px.imshow(
-                        pivot_conf, text_auto=".1%",
-                        color_continuous_scale="RdYlGn", zmin=0.9, zmax=1.0,
-                        title=f"선행 신호 반복성 ({g_x} 먼저 → {g_y} 나중)",
-                        labels={"color": "통계 신뢰도", "lag": "먼저 움직인 개월"},
+            valid_num = [v for v in available_vars if v in analysis_df.columns and analysis_df[v].notna().any()]
+    
+            cluster_features = st.multiselect(
+                "클러스터링 변수", valid_num,
+                default=[v for v in [price_col, vol_col, "GRDP"] if v in valid_num][:3],
+                key="cluster_features",
+                format_func=_fmt_var_by_col,
+            )
+            n_clusters = st.slider("클러스터 수", 2, 8, 4, key="n_clusters")
+    
+            if len(cluster_features) >= 2:
+                try:
+                    clustered_df, centers_df = _cached_cluster_regions(analysis_df, tuple(cluster_features), n_clusters)
+    
+                    # 클러스터 결과 테이블
+                    st.subheader("클러스터별 시도 배정")
+                    st.dataframe(clustered_df, use_container_width=True)
+    
+                    # 클러스터 시각화 (첫 2개 변수로 산점도)
+                    fig_cluster = px.scatter(
+                        clustered_df, x=cluster_features[0], y=cluster_features[1],
+                        color=clustered_df["cluster"].astype(str),
+                        text="시도", title="지역 클러스터링 결과",
+                        labels={"color": "클러스터"},
                     )
-                    register_fig("선행신호_반복성_히트맵", fig_g, "자유차트")
-                    st.plotly_chart(fig_g, use_container_width=True)
-
-                    # 상세 테이블
-                    with st.expander("상세 결과"):
-                        detail_g = granger_df.rename(columns={
-                            "lag": "먼저움직인개월",
-                            "p값": "낮을수록_우연가능성",
-                            "인과성": "반복패턴있음",
-                        })
-                        detail_g["통계신뢰도"] = 1 - detail_g["낮을수록_우연가능성"]
-                        st.dataframe(detail_g.style.format({
-                            "F통계량": "{:.4f}", "낮을수록_우연가능성": "{:.4f}", "통계신뢰도": "{:.1%}"
-                        }), use_container_width=True)
-
-            except (ValueError, ImportError) as e:
-                st.error(str(e))
-
-
-# ============================
-# Tab 8: 가격 예측 (Prophet)
-# ============================
-with main_tab8:
+                    fig_cluster.update_traces(textposition="top center")
+                    register_fig("클러스터링", fig_cluster, "고급분석")
+                    st.plotly_chart(fig_cluster, use_container_width=True)
+    
+                    # 클러스터 중심값
+                    st.subheader("클러스터 중심값")
+                    st.dataframe(centers_df.style.format(
+                        {c: "{:,.2f}" for c in cluster_features}
+                    ), use_container_width=True)
+    
+                    # 레이더 차트
+                    if len(cluster_features) >= 3:
+                        st.subheader("클러스터 프로파일 (레이더 차트)")
+                        # 정규화
+                        radar_df = centers_df.copy()
+                        for c in cluster_features:
+                            vmin, vmax = radar_df[c].min(), radar_df[c].max()
+                            radar_df[c] = (radar_df[c] - vmin) / (vmax - vmin) if vmax > vmin else 0
+    
+                        fig_radar = go.Figure()
+                        for _, row in radar_df.iterrows():
+                            fig_radar.add_trace(go.Scatterpolar(
+                                r=[row[c] for c in cluster_features] + [row[cluster_features[0]]],
+                                theta=cluster_features + [cluster_features[0]],
+                                name=f"클러스터 {int(row['cluster'])}",
+                            ))
+                        fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+                                                title="클러스터 프로파일")
+                        register_fig("레이더차트", fig_radar, "고급분석")
+                        st.plotly_chart(fig_radar, use_container_width=True)
+    
+                except (ValueError, ImportError) as e:
+                    st.error(str(e))
+            else:
+                st.info("변수를 2개 이상 선택하세요.")
+    
+    
+    # ============================
+    # Tab 6-2: Granger 인과성 (고급분석 서브탭)
+    # ============================
+    with sub_granger:
+        st.header("선행 신호 반복성")
+        st.caption("한 지표가 먼저 움직인 뒤 다른 지표가 따라온 패턴이 반복됐는지 확인합니다.")
+    
+        # Granger는 월별 시계열 데이터 필요
+        granger_src = filtered_monthly if not filtered_monthly.empty else monthly_df
+    
+        if granger_src.empty:
+            st.warning("월별 데이터가 필요합니다.")
+        else:
+            valid_num_g = [v for v in available_vars if v in granger_src.columns and granger_src[v].notna().any()]
+    
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                g_y = st.selectbox("나중에 움직였는지 볼 지표", [v for v in result_vars if v in valid_num_g], key="g_y", format_func=_fmt_var_by_col)
+            with col2:
+                g_x_candidates = [v for v in valid_num_g if v != g_y]
+                g_x = st.selectbox("먼저 움직였는지 볼 지표", g_x_candidates, key="g_x", format_func=_fmt_var_by_col)
+            with col3:
+                g_max_lag = st.slider("최대 몇 개월 먼저 움직였는지", 1, 12, 4, key="g_lag")
+    
+            if g_y and g_x:
+                try:
+                    granger_df = _cached_granger(granger_src, g_y, g_x, g_max_lag)
+    
+                    if granger_df.empty:
+                        st.warning("검정할 수 있는 데이터가 부족합니다.")
+                    else:
+                        # 요약: 선행 패턴이 반복된 시도 수
+                        causal_sido = granger_df[granger_df["인과성"]]["시도"].nunique()
+                        total_sido = granger_df["시도"].nunique()
+                        st.metric("선행 패턴 발견 지역", f"{causal_sido} / {total_sido}")
+    
+                        # 히트맵: 시도 × 기간별 통계 신뢰도
+                        pivot_g = granger_df.pivot_table(index="시도", columns="lag", values="p값", aggfunc="first")
+                        pivot_conf = 1 - pivot_g
+                        fig_g = px.imshow(
+                            pivot_conf, text_auto=".1%",
+                            color_continuous_scale="RdYlGn", zmin=0.9, zmax=1.0,
+                            title=f"선행 신호 반복성 ({g_x} 먼저 → {g_y} 나중)",
+                            labels={"color": "통계 신뢰도", "lag": "먼저 움직인 개월"},
+                        )
+                        register_fig("선행신호_반복성_히트맵", fig_g, "자유차트")
+                        st.plotly_chart(fig_g, use_container_width=True)
+    
+                        # 상세 테이블
+                        with st.expander("상세 결과"):
+                            detail_g = granger_df.rename(columns={
+                                "lag": "먼저움직인개월",
+                                "p값": "낮을수록_우연가능성",
+                                "인과성": "반복패턴있음",
+                            })
+                            detail_g["통계신뢰도"] = 1 - detail_g["낮을수록_우연가능성"]
+                            st.dataframe(detail_g.style.format({
+                                "F통계량": "{:.4f}", "낮을수록_우연가능성": "{:.4f}", "통계신뢰도": "{:.1%}"
+                            }), use_container_width=True)
+    
+                except (ValueError, ImportError) as e:
+                    st.error(str(e))
+    
+    
+    # ============================
+    # Tab 8: 가격 예측 (Prophet)
+    # ============================
+if main_tab8:
     st.header("AI 가격 예측 (Prophet)")
     st.caption("시계열 분해 + 계절성 모델로 시도별 아파트 가격을 예측합니다.")
 
@@ -3921,7 +3921,7 @@ with main_tab8:
 # ============================
 # Tab 9: 투자 계산기
 # ============================
-with main_tab9:
+if main_tab9:
     st.header("투자 수익률 & 세금 계산기")
     st.caption("취득세·양도세·이자비용을 자동 계산하고, 레버리지 포함 투자 수익률을 산출합니다. (2026년 세율 기준)")
 
@@ -4166,7 +4166,7 @@ with main_tab9:
 # ============================
 # Tab 10: 소득-매물 매칭
 # ============================
-with listing_tab:
+if listing_tab:
     st.header("매물현황")
     render_tab_usage_guide("매물현황")
     st.caption("구매력, 급지, 실거래, 네이버 호가를 함께 보며 반복 국면에서 살 만한 지역과 매물을 찾습니다.")
@@ -4436,7 +4436,7 @@ with listing_tab:
         with st.expander("필수 업로드 컬럼 예시"):
             st.write("단지명, 거래유형, 매물가격, 시도, 시군구, 면적, 층, 매물URL, 확인일")
 
-with main_tab10:
+if main_tab10:
     st.header("적정가·구매력")
     st.caption("소득분위별 구매력(순자산 + 주담대 PMT 역산)을 계산하고, 시군구 급지순위·실거래가와 매칭합니다.")
     render_tab_usage_guide("적정가·구매력")
@@ -4664,7 +4664,7 @@ with main_tab10:
 # ============================
 # Tab 11: 커뮤니티 게시판
 # ============================
-with main_tab11:
+if main_tab11:
     st.header("커뮤니티 게시판")
     st.caption("차트와 분석 설정을 저장하고 다른 사용자와 공유합니다.")
 
