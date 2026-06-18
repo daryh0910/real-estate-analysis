@@ -3620,7 +3620,7 @@ with sub_granger:
 
         if g_y and g_x:
             try:
-                granger_df = granger_causality_test(granger_src, g_y, g_x, max_lag=g_max_lag)
+                granger_df = _cached_granger(granger_src, g_y, g_x, g_max_lag)
 
                 if granger_df.empty:
                     st.warning("검정할 수 있는 데이터가 부족합니다.")
