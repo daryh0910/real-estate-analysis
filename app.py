@@ -399,11 +399,23 @@ def _compute_formulas(
 
 
 # --- 페이지 구성 ---
-overview_tab, buy_decision_tab, demand_supply_tab, transaction_tab, listing_tab, valuation_tab = st.tabs([
-    "Overview", "매수판단", "수요공급분석", "거래현황", "매물현황", "자유차트"
+# 탭을 두 축으로 분리한다.
+#   🧭 직관 축: 시장을 10초 안에 직관적으로 이해 (Overview·수요공급·거래·매물)
+#   🔬 검증 축: 구매력을 정량화해 가설을 세우고 실거래가에 대입 (매수판단·적정가·자유차트)
+(
+    overview_tab,
+    demand_supply_tab,
+    transaction_tab,
+    listing_tab,
+    buy_decision_tab,
+    affordability_tab,
+    valuation_tab,
+) = st.tabs([
+    "🧭 Overview", "🧭 수요공급분석", "🧭 거래현황", "🧭 매물현황",
+    "🔬 매수판단", "🔬 적정가·구매력", "🔬 자유차트",
 ])
 
-# 기존 11개 화면 블록을 5개 상위 탭으로 재배치한다.
+# 기존 11개 화면 블록을 7개 상위 탭으로 재배치한다.
 main_tab1 = overview_tab
 main_tab2 = transaction_tab
 main_tab3 = transaction_tab
@@ -413,8 +425,8 @@ main_tab6 = valuation_tab
 main_tab7 = valuation_tab
 main_tab8 = valuation_tab
 main_tab9 = valuation_tab
-main_tab10 = listing_tab
-main_tab11 = listing_tab
+main_tab10 = affordability_tab  # 소득-매물 매칭/구매력 → 독립 '적정가·구매력' 탭으로 승격
+main_tab11 = listing_tab        # 커뮤니티 게시판은 매물현황 탭에 유지
 
 TAB_USAGE_GUIDES = {
     "Overview": {
