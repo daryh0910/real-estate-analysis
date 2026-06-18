@@ -399,23 +399,36 @@ def _compute_formulas(
 
 
 # --- 페이지 구성 ---
-# 탭을 두 축으로 분리한다.
+# 탭을 두 축으로 분리하고, '선택한 페이지 1개'만 렌더한다(lazy rendering).
 #   🧭 직관 축: 시장을 10초 안에 직관적으로 이해 (Overview·수요공급·거래·매물)
 #   🔬 검증 축: 구매력을 정량화해 가설을 세우고 실거래가에 대입 (매수판단·적정가·자유차트)
-(
-    overview_tab,
-    demand_supply_tab,
-    transaction_tab,
-    listing_tab,
-    buy_decision_tab,
-    affordability_tab,
-    valuation_tab,
-) = st.tabs([
+# st.tabs는 7개 탭 본문을 매 실행마다 전부 계산해 느리므로, segmented_control로 바꿔
+# 비활성 페이지의 무거운 차트·연산을 아예 실행하지 않는다.
+_PAGES = [
     "🧭 Overview", "🧭 수요공급분석", "🧭 거래현황", "🧭 매물현황",
     "🔬 매수판단", "🔬 적정가·구매력", "🔬 자유차트",
-])
+]
+st.caption("🧭 직관 = 시장을 빠르게 이해  ·  🔬 검증 = 구매력 정량화·가설 검증")
+_sel = st.segmented_control(
+    "분석 화면",
+    _PAGES,
+    default=_PAGES[0],
+    key="active_page",
+    label_visibility="collapsed",
+)
+_active = _sel or _PAGES[0]
 
-# 기존 11개 화면 블록을 7개 상위 탭으로 재배치한다.
+# 각 탭 변수는 이제 '활성 여부' 불리언이다. 아래 `if <탭>:` 블록은 alias를 그대로
+# 따르므로(예: main_tab6 = valuation_tab), 해당 페이지가 선택됐을 때만 실행된다.
+overview_tab      = (_active == "🧭 Overview")
+demand_supply_tab = (_active == "🧭 수요공급분석")
+transaction_tab   = (_active == "🧭 거래현황")
+listing_tab       = (_active == "🧭 매물현황")
+buy_decision_tab  = (_active == "🔬 매수판단")
+affordability_tab = (_active == "🔬 적정가·구매력")
+valuation_tab     = (_active == "🔬 자유차트")
+
+# 기존 11개 화면 블록을 7개 상위 페이지로 재배치한다.
 main_tab1 = overview_tab
 main_tab2 = transaction_tab
 main_tab3 = transaction_tab
@@ -425,8 +438,8 @@ main_tab6 = valuation_tab
 main_tab7 = valuation_tab
 main_tab8 = valuation_tab
 main_tab9 = valuation_tab
-main_tab10 = affordability_tab  # 소득-매물 매칭/구매력 → 독립 '적정가·구매력' 탭으로 승격
-main_tab11 = listing_tab        # 커뮤니티 게시판은 매물현황 탭에 유지
+main_tab10 = affordability_tab  # 소득-매물 매칭/구매력 → 독립 '적정가·구매력' 페이지로 승격
+main_tab11 = listing_tab        # 커뮤니티 게시판은 매물현황 페이지에 유지
 
 TAB_USAGE_GUIDES = {
     "Overview": {
