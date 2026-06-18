@@ -3708,16 +3708,21 @@ with main_tab8:
         _fc_unit = "만원 (보증금)"
 
     # ── 예측 실행 ────────────────────────────────────────────────────────────
-    with st.spinner(f"{_fc_sido} {_fc_mode} 가격 예측 중..."):
-        _fc_result = forecast_price(
-            df=_fc_src_df,
-            sido=_fc_sido,
-            periods=_fc_periods,
-            price_col=_fc_price_col,
-        )
+    # Prophet 적합은 가장 무거운 연산이므로 버튼으로 수동 실행한다.
+    # (st.tabs는 모든 탭 본문을 매 실행마다 돌리므로, 자동 실행하면 다른 탭을 봐도 매번 재적합된다.)
+    if st.button("📈 예측 실행", key="fc_run", type="primary"):
+        st.session_state["fc_done"] = True
+
+    if st.session_state.get("fc_done"):
+        with st.spinner(f"{_fc_sido} {_fc_mode} 가격 예측 중..."):
+            _fc_result = _cached_forecast_price(_fc_src_df, _fc_sido, _fc_periods, _fc_price_col)
+    else:
+        st.info("'📈 예측 실행' 버튼을 누르면 Prophet 가격 예측을 수행합니다. (무거운 연산이라 자동 실행하지 않습니다.)")
+        _fc_result = {"error": "_NOT_RUN_"}
 
     if "error" in _fc_result:
-        st.error(_fc_result["error"])
+        if _fc_result["error"] != "_NOT_RUN_":
+            st.error(_fc_result["error"])
     else:
         _fc_actual = _fc_result["actual"]
         _fc_forecast = _fc_result["forecast"]
