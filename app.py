@@ -3826,9 +3826,10 @@ if main_tab7:
                             }), use_container_width=True)
     
                 except (ValueError, ImportError) as e:
-                    st.error(str(e))
-    
-    
+                    print(f"[ERROR] Granger 인과성: {e}")
+                    st.error("분석을 완료할 수 없습니다. 변수 조합이나 데이터 범위를 변경해 주세요.")
+
+
     # ============================
     # Tab 8: 가격 예측 (Prophet)
     # ============================
