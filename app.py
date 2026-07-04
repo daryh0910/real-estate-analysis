@@ -112,6 +112,11 @@ st.markdown(
     ::-webkit-scrollbar{ width:10px; height:10px; }
     ::-webkit-scrollbar-thumb{ background:#30363d; border-radius:6px; }
     ::-webkit-scrollbar-track{ background:transparent; }
+    /* 모바일 최소 대응 */
+    @media (max-width:768px){
+      [data-testid="stMainBlockContainer"],.block-container{ max-width:100% !important; padding:0.5rem !important; }
+      [data-testid="stMetricValue"]{ font-size:1.2rem !important; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
