@@ -1917,14 +1917,17 @@ if main_tab2:
     render_tab_usage_guide("거래현황")
     st.caption("실거래 흐름과 네이버 매물 호가를 같은 지역/단지 단위로 비교합니다.")
 
-    _naver_upload = st.file_uploader(
-        "네이버부동산 매물 CSV/JSON 업로드",
-        type=["csv", "json"],
-        key="naver_listing_upload",
-        help="반자동 수집 결과나 저장한 응답 파일을 업로드하면 표준 매물 테이블로 정규화합니다.",
-    )
-    if _naver_upload is not None:
-        st.session_state["naver_listings_df"] = parse_naver_listing_upload(_naver_upload)
+    if not RELEASE_READ_ONLY:
+        _naver_upload = st.file_uploader(
+            "네이버부동산 매물 CSV/JSON 업로드",
+            type=["csv", "json"],
+            key="naver_listing_upload",
+            help="반자동 수집 결과나 저장한 응답 파일을 업로드하면 표준 매물 테이블로 정규화합니다.",
+        )
+        if _naver_upload is not None:
+            st.session_state["naver_listings_df"] = parse_naver_listing_upload(_naver_upload)
+    else:
+        st.caption("💡 매물 파일 업로드는 추후 지원 예정입니다.")
 
     _naver_df = _clean_listing_df(st.session_state.get("naver_listings_df", pd.DataFrame()))
     if not _naver_df.empty:
