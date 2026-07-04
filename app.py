@@ -4995,3 +4995,22 @@ with st.sidebar:
                     st.warning("제목, 닉네임, 비밀번호를 모두 입력하세요.")
         else:
             st.info("차트가 표시되면 저장할 수 있습니다.")
+
+    # --- 글로벌 면책 배너 ---
+    _data_max_month = "N/A"
+    try:
+        if not apt_df.empty and "연월" in apt_df.columns:
+            _data_max_month = str(apt_df["연월"].max())
+        elif not apt_df.empty and "연도" in apt_df.columns:
+            _data_max_month = f"{int(apt_df['연도'].max())}년"
+    except Exception:
+        pass
+    st.markdown(
+        f"""<div style="margin-top:16px;padding:10px 12px;background:#161B22;
+        border:1px solid #2A313C;border-radius:8px;font-size:11px;color:#8B949E;line-height:1.6;">
+        ⚠️ <b>면책 고지</b><br>
+        본 서비스는 공공데이터 기반 <b>참고 자료</b>이며, 투자 판단의 근거로 사용될 수 없습니다.
+        데이터 기준: <b>{_data_max_month}</b>. 실제 투자 전 별도 전문가 확인이 필요합니다.
+        </div>""",
+        unsafe_allow_html=True,
+    )
