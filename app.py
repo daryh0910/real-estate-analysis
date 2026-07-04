@@ -65,6 +65,54 @@ st.set_page_config(
     layout="wide",
 )
 
+# === 다크 프로(TradingView형) 전역 테마 CSS (2026-07-04) ===
+st.markdown(
+    """
+    <style>
+    :root{
+      --re-bg:#0E1117; --re-panel:#161B22; --re-border:#2A313C;
+      --re-text:#E6EDF3; --re-muted:#8B949E; --re-accent:#2962FF;
+      --re-up:#26A69A; --re-down:#EF5350;
+    }
+    html, body, [class*="css"]{ font-family:"Noto Sans KR","Pretendard",-apple-system,sans-serif; }
+    /* 상단 툴바(Deploy·메뉴) 숨김, 헤더 투명 */
+    [data-testid="stToolbar"], [data-testid="stAppDeployButton"], .stDeployButton{ display:none !important; }
+    header[data-testid="stHeader"]{ background:transparent; }
+    /* 본문 밀도 */
+    [data-testid="stMainBlockContainer"], .block-container{ padding-top:1.4rem; padding-bottom:2.5rem; max-width:1520px; }
+    /* 사이드바 */
+    section[data-testid="stSidebar"]{ background:var(--re-panel); border-right:1px solid var(--re-border); }
+    /* 제목 타이포 */
+    h1,h2,h3{ letter-spacing:-0.01em; font-weight:800; }
+    h1{ font-size:1.9rem; } h2{ font-size:1.4rem; }
+    /* 지표(metric) 카드화 */
+    [data-testid="stMetric"]{
+      background:var(--re-panel); border:1px solid var(--re-border);
+      border-radius:12px; padding:14px 16px;
+    }
+    [data-testid="stMetricValue"]{ font-weight:800; font-size:1.7rem; }
+    [data-testid="stMetricLabel"] p{ color:var(--re-muted); font-weight:600; }
+    /* 세그먼티드 컨트롤(탭 네비) */
+    [data-testid="stButtonGroup"] button{ border-radius:8px !important; font-weight:700; }
+    /* 차트·표 패널화 */
+    [data-testid="stPlotlyChart"]{
+      background:var(--re-panel); border:1px solid var(--re-border);
+      border-radius:12px; padding:8px 10px;
+    }
+    [data-testid="stDataFrame"]{ border:1px solid var(--re-border); border-radius:12px; }
+    /* expander 패널화 */
+    [data-testid="stExpander"]{ border:1px solid var(--re-border); border-radius:12px; background:var(--re-panel); }
+    /* 구분선 */
+    hr{ border-color:var(--re-border); }
+    /* 스크롤바 */
+    ::-webkit-scrollbar{ width:10px; height:10px; }
+    ::-webkit-scrollbar-thumb{ background:#30363d; border-radius:6px; }
+    ::-webkit-scrollbar-track{ background:transparent; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Streamlit Cloud (Linux) 한글 폰트 기본값 — packages.txt에 fonts-noto-cjk 설치 필요
 PLOTLY_FONT = dict(family="Noto Sans KR, Noto Sans CJK KR, sans-serif", size=12)
 
