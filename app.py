@@ -203,7 +203,8 @@ def get_data():
 try:
     data = get_data()
 except Exception as e:
-    st.error(f"데이터 로딩 실패: {e}")
+    print(f"[ERROR] 데이터 로딩 실패: {e}")
+    st.error("데이터를 불러올 수 없습니다. 잠시 후 새로고침하세요.")
     data = {}
 
 apt_df = data.get("apt", pd.DataFrame())
