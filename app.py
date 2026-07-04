@@ -11,6 +11,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
+import numexpr as ne
+
+# 릴리스 모드 — True: 게시판 글쓰기·파일업로드 비활성 (보안·안정성)
+RELEASE_READ_ONLY = True
 
 from buy_decision.schemas import PURPOSES
 from buy_decision.view_model import build_buy_decision_view_model
