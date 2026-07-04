@@ -3759,7 +3759,8 @@ if main_tab7:
                         st.plotly_chart(fig_radar, use_container_width=True)
     
                 except (ValueError, ImportError) as e:
-                    st.error(str(e))
+                    print(f"[ERROR] 클러스터링: {e}")
+                    st.error("분석을 완료할 수 없습니다. 변수 조합이나 데이터 범위를 변경해 주세요.")
             else:
                 st.info("변수를 2개 이상 선택하세요.")
     
