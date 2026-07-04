@@ -484,6 +484,98 @@ _sel = st.segmented_control(
 )
 _active = _sel or _PAGES[0]
 
+# === 전역 KPI 요약 바 — 모든 탭에서 항상 표시 ===
+def _render_kpi_bar():
+    _items = []
+
+    # 1. 시장 온도계
+    try:
+        _ms, _md, _ = compute_market_temperature(analysis_df)
+        _ml = "과열" if _ms > 60 else ("침체" if _ms < 40 else "중립")
+        _mc = "#EF5350" if _ms > 60 else ("#2962FF" if _ms < 40 else "#F5B301")
+        _items.append(("🌡️ 시장온도계", f"{_ms:.0f}", f"{_md:+.1f} {_ml}", _mc))
+    except Exception:
+        _items.append(("🌡️ 시장온도계", "N/A", "", "#8B949E"))
+
+    # 2. 평균가격  3. 거래량
+    if analysis_mode == "매매 분석" and not filtered_apt.empty and "연도" in filtered_apt.columns:
+        _yl = int(filtered_apt["연도"].max())
+        _yp = _yl - 1
+        _grp = filtered_apt.groupby("연도")
+        _pm = _grp["평균가격"].mean()
+        _pnow, _pprev = _pm.get(_yl), _pm.get(_yp)
+        if _pnow is not None:
+            _pd = f"YoY {(_pnow-_pprev)/_pprev*100:+.1f}%" if (_pprev and _pprev != 0) else ""
+            _items.append(("💰 평균가격", f"{_pnow:,.0f}만", _pd,
+                           "#26A69A" if (_pprev and _pnow > _pprev) else "#EF5350"))
+        else:
+            _items.append(("💰 평균가격", "N/A", "", "#8B949E"))
+        _vm = _grp["거래량"].sum()
+        _vnow, _vprev = _vm.get(_yl), _vm.get(_yp)
+        if _vnow is not None:
+            _vd = f"YoY {int(_vnow-_vprev):+,}건" if _vprev is not None else ""
+            _items.append(("📊 거래량", f"{int(_vnow):,}건", _vd,
+                           "#26A69A" if (_vprev is not None and _vnow > _vprev) else "#EF5350"))
+        else:
+            _items.append(("📊 거래량", "N/A", "", "#8B949E"))
+    else:
+        _items.append(("💰 평균가격", "N/A", "", "#8B949E"))
+        _items.append(("📊 거래량", "N/A", "", "#8B949E"))
+
+    # 4. 전세가율
+    try:
+        if "전세가율" in analysis_df.columns and "연도" in analysis_df.columns and not analysis_df.empty:
+            _jg = analysis_df.groupby("연도")["전세가율"].mean()
+            _jy = int(analysis_df["연도"].max())
+            _jr, _jp = _jg.get(_jy), _jg.get(_jy - 1)
+            if _jr is not None:
+                _jd = f"{_jr-_jp:+.1f}%p" if _jp is not None else ""
+                _items.append(("🏠 전세가율", f"{_jr:.1f}%", _jd,
+                               "#26A69A" if (_jp is not None and _jr > _jp) else "#EF5350"))
+            else:
+                _items.append(("🏠 전세가율", "N/A", "", "#8B949E"))
+        else:
+            _items.append(("🏠 전세가율", "N/A", "", "#8B949E"))
+    except Exception:
+        _items.append(("🏠 전세가율", "N/A", "", "#8B949E"))
+
+    # 5. KB 매수우위 or 주택가격전망CSI
+    try:
+        _kc = next((c for c in ["KB_매수우위지수", "주택가격전망CSI"]
+                    if c in analysis_df.columns and analysis_df[c].notna().any()), None)
+        if _kc and not analysis_df.empty:
+            _kv = float(analysis_df[_kc].dropna().iloc[-1])
+            _kl = "매수우위" if _kv > 100 else "매도우위"
+            _kname = "KB 매수우위" if "매수" in _kc else "가격전망CSI"
+            _items.append((f"💡 {_kname}", f"{_kv:.1f}",
+                           _kl, "#26A69A" if _kv > 100 else "#EF5350"))
+        else:
+            _items.append(("💡 KB매수우위", "N/A", "", "#8B949E"))
+    except Exception:
+        _items.append(("💡 KB매수우위", "N/A", "", "#8B949E"))
+
+    # HTML 렌더링
+    _cards = ""
+    for _lbl, _val, _dlt, _clr in _items:
+        _dlt_html = (f'<div style="font-size:11px;color:{_clr};margin-top:2px;">{_dlt}</div>'
+                     if _dlt else '<div style="font-size:11px;min-height:16px;"></div>')
+        _cards += f"""
+        <div style="flex:1;background:#161B22;border:1px solid #2A313C;border-radius:10px;
+                    padding:10px 14px;min-width:0;box-sizing:border-box;">
+          <div style="font-size:11px;color:#8B949E;font-weight:600;
+                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{_lbl}</div>
+          <div style="font-size:1.3rem;font-weight:800;color:#E6EDF3;
+                      line-height:1.2;margin-top:4px;letter-spacing:-0.02em;">{_val}</div>
+          {_dlt_html}
+        </div>"""
+    st.markdown(
+        f'<div style="display:flex;gap:10px;margin:10px 0 4px;">{_cards}</div>'
+        '<hr style="border:none;border-top:1px solid #2A313C;margin:12px 0 16px;">',
+        unsafe_allow_html=True,
+    )
+
+_render_kpi_bar()
+
 # 각 탭 변수는 이제 '활성 여부' 불리언이다. 아래 `if <탭>:` 블록은 alias를 그대로
 # 따르므로(예: main_tab6 = valuation_tab), 해당 페이지가 선택됐을 때만 실행된다.
 overview_tab      = (_active == "🧭 Overview")
