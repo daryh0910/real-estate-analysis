@@ -4960,34 +4960,35 @@ if main_tab11:
 # --- 게시판 저장 위젯 (사이드바) ---
 with st.sidebar:
     st.divider()
-    st.subheader("📌 게시판에 저장")
-    board_figs = st.session_state.get("_board_figures", {})
-    if board_figs:
-        fig_options = list(board_figs.keys())
-        save_chart = st.selectbox(
-            "저장할 차트",
-            options=fig_options,
-            format_func=lambda k: f"[{board_figs[k]['tab_name']}] {k}",
-            key="board_sel_chart",
-        )
-        save_title = st.text_input("제목", key="board_save_title")
-        save_desc = st.text_area("설명 (선택)", key="board_save_desc", height=80)
-        save_author = st.text_input("닉네임", key="board_save_author")
-        save_pw = st.text_input("비밀번호", type="password", key="board_save_pw",
-                                help="수정/삭제 시 필요")
-        if st.button("게시판에 저장", key="board_save_btn", type="primary"):
-            if save_title and save_author and save_pw:
-                from board import create_post, capture_current_settings
-                entry = board_figs[save_chart]
-                settings = capture_current_settings()
-                post_id = create_post(
-                    title=save_title, description=save_desc,
-                    author=save_author, password=save_pw,
-                    tab_name=entry["tab_name"], fig=entry["fig"],
-                    settings=settings,
-                )
-                st.success(f"저장 완료! (#{post_id})")
-            else:
-                st.warning("제목, 닉네임, 비밀번호를 모두 입력하세요.")
-    else:
-        st.info("차트가 표시되면 저장할 수 있습니다.")
+    if not RELEASE_READ_ONLY:
+        st.subheader("📌 게시판에 저장")
+        board_figs = st.session_state.get("_board_figures", {})
+        if board_figs:
+            fig_options = list(board_figs.keys())
+            save_chart = st.selectbox(
+                "저장할 차트",
+                options=fig_options,
+                format_func=lambda k: f"[{board_figs[k]['tab_name']}] {k}",
+                key="board_sel_chart",
+            )
+            save_title = st.text_input("제목", key="board_save_title")
+            save_desc = st.text_area("설명 (선택)", key="board_save_desc", height=80)
+            save_author = st.text_input("닉네임", key="board_save_author")
+            save_pw = st.text_input("비밀번호", type="password", key="board_save_pw",
+                                    help="수정/삭제 시 필요")
+            if st.button("게시판에 저장", key="board_save_btn", type="primary"):
+                if save_title and save_author and save_pw:
+                    from board import create_post, capture_current_settings
+                    entry = board_figs[save_chart]
+                    settings = capture_current_settings()
+                    post_id = create_post(
+                        title=save_title, description=save_desc,
+                        author=save_author, password=save_pw,
+                        tab_name=entry["tab_name"], fig=entry["fig"],
+                        settings=settings,
+                    )
+                    st.success(f"저장 완료! (#{post_id})")
+                else:
+                    st.warning("제목, 닉네임, 비밀번호를 모두 입력하세요.")
+        else:
+            st.info("차트가 표시되면 저장할 수 있습니다.")
