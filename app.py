@@ -4895,28 +4895,29 @@ if main_tab11:
                 st.text(c["content"])
                 st.markdown("---")
 
-            with st.form(key=f"comment_form_{post['id']}"):
-                c_author = st.text_input("닉네임", key="cmt_author")
-                c_content = st.text_area("댓글 내용", key="cmt_content", height=80)
-                if st.form_submit_button("댓글 등록"):
-                    if c_author and c_content:
-                        add_comment(post["id"], c_author, c_content)
-                        st.rerun()
-                    else:
-                        st.warning("닉네임과 내용을 모두 입력하세요.")
-
-            # 삭제
-            st.divider()
-            with st.expander("게시글 삭제"):
-                del_pw = st.text_input("비밀번호 확인", type="password", key="del_pw")
-                if st.button("삭제", key="del_btn"):
-                    if del_pw:
-                        if delete_post(post["id"], del_pw):
-                            st.success("삭제되었습니다.")
-                            st.session_state["board_view"] = ("gallery",)
+            if not RELEASE_READ_ONLY:
+                with st.form(key=f"comment_form_{post['id']}"):
+                    c_author = st.text_input("닉네임", key="cmt_author")
+                    c_content = st.text_area("댓글 내용", key="cmt_content", height=80)
+                    if st.form_submit_button("댓글 등록"):
+                        if c_author and c_content:
+                            add_comment(post["id"], c_author, c_content)
                             st.rerun()
                         else:
-                            st.error("비밀번호가 일치하지 않습니다.")
+                            st.warning("닉네임과 내용을 모두 입력하세요.")
+
+                # 삭제
+                st.divider()
+                with st.expander("게시글 삭제"):
+                    del_pw = st.text_input("비밀번호 확인", type="password", key="del_pw")
+                    if st.button("삭제", key="del_btn"):
+                        if del_pw:
+                            if delete_post(post["id"], del_pw):
+                                st.success("삭제되었습니다.")
+                                st.session_state["board_view"] = ("gallery",)
+                                st.rerun()
+                            else:
+                                st.error("비밀번호가 일치하지 않습니다.")
     else:
         # --- 갤러리 뷰 ---
         total = get_post_count()
