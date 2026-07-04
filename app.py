@@ -2588,22 +2588,20 @@ if main_tab4:
                     placeholder="예: 평균가격 / GRDP * 12   또는   (전세_보증금평균 + 월세_보증금평균) / 총인구",
                 )
 
-                # ④ 실시간 수식 검증
+                # ④ 실시간 수식 검증 (numexpr 기반 — RCE 취약점 차단)
                 if formula_str.strip() and not analysis_df.empty:
-                    _test_ns = {
-                        col: analysis_df[col].astype(float)
+                    _test_ns_ne = {
+                        col: analysis_df[col].astype(float).values
                         for col in numeric_cols_5 if col in analysis_df.columns
                     }
-                    _test_ns.update({"__builtins__": {}, "abs": np.abs, "sqrt": np.sqrt,
-                                     "log": np.log, "log10": np.log10, "exp": np.exp})
                     try:
                         with np.errstate(divide="ignore", invalid="ignore"):
-                            _res = eval(formula_str, {"__builtins__": {}}, _test_ns)
-                        if hasattr(_res, "dropna"):
-                            _valid_n = _res.replace([np.inf, -np.inf], np.nan).dropna().shape[0]
-                            _sample = _res.replace([np.inf, -np.inf], np.nan).dropna()
-                            _hint = f"{_sample.iloc[0]:,.4f}" if len(_sample) > 0 else "없음"
-                            st.success(f"수식 유효  |  유효 데이터 {_valid_n}행  |  첫 유효값: {_hint}")
+                            _res = ne.evaluate(formula_str, local_dict=_test_ns_ne)
+                        _res_s = pd.Series(_res).replace([np.inf, -np.inf], np.nan)
+                        _valid_n = _res_s.dropna().shape[0]
+                        _sample = _res_s.dropna()
+                        if _valid_n > 0:
+                            st.success(f"수식 유효  |  유효 데이터 {_valid_n}행  |  첫 유효값: {_sample.iloc[0]:,.4f}")
                         else:
                             st.success(f"수식 유효  |  결과: {float(_res):,.4f}")
                     except Exception as _e:
