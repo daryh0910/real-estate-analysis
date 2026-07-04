@@ -426,41 +426,35 @@ def _compute_formulas(
     _src_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    수식 문자열을 eval로 계산하여 캐싱.
+    수식 문자열을 numexpr로 계산하여 캐싱 (eval() 대신 사용 — RCE 취약점 원천 차단).
+    numexpr은 사칙연산·log/exp/sqrt/abs 등 수치 연산만 허용하며 속성 접근·함수 호출이 문법적으로 불가.
     _src_df: 언더스코어 접두어로 Streamlit 해싱 제외 (cache_key가 대신 무효화 담당)
     """
     src = _src_df.copy()
     if sido_list:
         src = src[src["시도"].isin(list(sido_list))]
 
-    _SAFE_GLOBALS = {
-        "__builtins__": {},
-        "abs": np.abs, "sqrt": np.sqrt,
-        "log": np.log, "log10": np.log10, "exp": np.exp,
-    }
-
     parts = []
     for sido_name, group in src.groupby("시도"):
         group = group.sort_values(time_col).reset_index(drop=True)
         row = group[[time_col, "시도"]].copy()
-        namespace = {**_SAFE_GLOBALS}
+        # numexpr local_dict: 변수명 → numpy array (pandas Series 자동 변환)
+        namespace_ne = {}
         for col in var_names:
             if col in group.columns:
-                namespace[col] = group[col].astype(float)
+                namespace_ne[col] = group[col].astype(float).values
         for label, expr in formula_strs:
             if not expr.strip():
                 row[label] = np.nan
                 continue
             try:
                 with np.errstate(divide="ignore", invalid="ignore"):
-                    result = eval(expr, {"__builtins__": {}}, namespace)
-                if isinstance(result, (int, float)):
+                    result = ne.evaluate(expr, local_dict=namespace_ne)
+                if result.ndim == 0:  # 스칼라 결과
                     row[label] = float(result)
-                elif hasattr(result, "values"):
-                    s = pd.Series(result.values, index=group.index)
-                    row[label] = s.replace([np.inf, -np.inf], np.nan).values
                 else:
-                    row[label] = np.nan
+                    s = pd.Series(result, index=group.index)
+                    row[label] = s.replace([np.inf, -np.inf], np.nan).values
             except Exception:
                 row[label] = np.nan
         parts.append(row)
