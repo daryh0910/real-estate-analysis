@@ -68,6 +68,23 @@ st.set_page_config(
 # Streamlit Cloud (Linux) 한글 폰트 기본값 — packages.txt에 fonts-noto-cjk 설치 필요
 PLOTLY_FONT = dict(family="Noto Sans KR, Noto Sans CJK KR, sans-serif", size=12)
 
+# === 다크 프로(TradingView형) Plotly 템플릿 (2026-07-04) ===
+# 모든 차트에 전역 적용. 개별 figure가 template/색을 명시하지 않으면 이 값을 사용.
+pio.templates["re_dark"] = go.layout.Template(
+    layout=dict(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Noto Sans KR, Noto Sans CJK KR, sans-serif", size=12, color="#E6EDF3"),
+        colorway=["#2962FF", "#26A69A", "#EF5350", "#F5B301", "#AB47BC", "#26C6DA", "#66BB6A", "#FF7043"],
+        xaxis=dict(gridcolor="#222A35", zerolinecolor="#222A35", linecolor="#2A313C", tickfont=dict(color="#8B949E")),
+        yaxis=dict(gridcolor="#222A35", zerolinecolor="#222A35", linecolor="#2A313C", tickfont=dict(color="#8B949E")),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#C9D1D9")),
+        hoverlabel=dict(bgcolor="#161B22", font=dict(color="#E6EDF3", size=12), bordercolor="#2A313C"),
+        margin=dict(t=48, r=16, b=16, l=16),
+    )
+)
+pio.templates.default = "re_dark"
+
 
 INDICATOR_CATALOG = [
     # 가격
