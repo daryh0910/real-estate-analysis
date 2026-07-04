@@ -1408,7 +1408,7 @@ if main_tab1:
                         color="밸류스코어",
                         color_continuous_scale=["#e74c3c", "#f1c40f", "#2ecc71"],  # 빨강→노랑→초록
                         range_color=[_map_df["밸류스코어"].quantile(0.05), _map_df["밸류스코어"].quantile(0.95)],
-                        mapbox_style="carto-positron",
+                        mapbox_style="carto-darkmatter",
                         center={"lat": 36.5, "lon": 127.8},
                         zoom=6,
                         hover_data=_hover_cols,
