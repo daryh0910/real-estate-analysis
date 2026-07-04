@@ -1599,7 +1599,8 @@ if main_tab1:
                     key="dl_value_score",
                 )
     except Exception as e:
-        st.error(f"밸류스코어 계산 오류: {e}")
+        print(f"[ERROR] 밸류스코어 계산 오류: {e}")
+        st.error("밸류스코어를 계산할 수 없습니다. 데이터 범위를 좁혀 다시 시도해 주세요.")
 
     st.divider()
 
