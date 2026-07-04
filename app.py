@@ -9,6 +9,7 @@ import json
 import math
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
 from plotly.subplots import make_subplots
 
 from buy_decision.schemas import PURPOSES
