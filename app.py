@@ -526,38 +526,6 @@ def _render_kpi_bar():
         _items.append(("💰 평균가격", "N/A", "", "#8B949E"))
         _items.append(("📊 거래량", "N/A", "", "#8B949E"))
 
-    # 4. 전세가율
-    try:
-        if "전세가율" in analysis_df.columns and "연도" in analysis_df.columns and not analysis_df.empty:
-            _jg = analysis_df.groupby("연도")["전세가율"].mean()
-            _jy = int(analysis_df["연도"].max())
-            _jr, _jp = _jg.get(_jy), _jg.get(_jy - 1)
-            if _jr is not None:
-                _jd = f"{_jr-_jp:+.1f}%p" if _jp is not None else ""
-                _items.append(("🏠 전세가율", f"{_jr:.1f}%", _jd,
-                               "#26A69A" if (_jp is not None and _jr > _jp) else "#EF5350"))
-            else:
-                _items.append(("🏠 전세가율", "N/A", "", "#8B949E"))
-        else:
-            _items.append(("🏠 전세가율", "N/A", "", "#8B949E"))
-    except Exception:
-        _items.append(("🏠 전세가율", "N/A", "", "#8B949E"))
-
-    # 5. KB 매수우위 or 주택가격전망CSI
-    try:
-        _kc = next((c for c in ["KB_매수우위지수", "주택가격전망CSI"]
-                    if c in analysis_df.columns and analysis_df[c].notna().any()), None)
-        if _kc and not analysis_df.empty:
-            _kv = float(analysis_df[_kc].dropna().iloc[-1])
-            _kl = "매수우위" if _kv > 100 else "매도우위"
-            _kname = "KB 매수우위" if "매수" in _kc else "가격전망CSI"
-            _items.append((f"💡 {_kname}", f"{_kv:.1f}",
-                           _kl, "#26A69A" if _kv > 100 else "#EF5350"))
-        else:
-            _items.append(("💡 KB매수우위", "N/A", "", "#8B949E"))
-    except Exception:
-        _items.append(("💡 KB매수우위", "N/A", "", "#8B949E"))
-
     # HTML 렌더링
     _cards = ""
     for _lbl, _val, _dlt, _clr in _items:
