@@ -2279,6 +2279,8 @@ if main_tab4:
     render_tab_usage_guide("수요공급분석")
     st.caption("모든 변수를 사칙연산으로 조합하여 새로운 지표를 계산하고 시각화합니다.")
 
+    advanced_mode_5 = st.toggle("🔧 고급 모드 (수식 직접 만들기)", key="f5_advanced", value=False)
+
     # ── 변수 메타데이터 (카테고리/출처 컬럼 추가) ───────────────────
     VAR_META = pd.DataFrame([
         # 거래결과 > 매매
