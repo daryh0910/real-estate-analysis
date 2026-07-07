@@ -2460,153 +2460,164 @@ if main_tab4:
     if not numeric_cols_5:
         st.warning("사용 가능한 수치형 변수가 없습니다.")
     else:
-        # ── 수식 정의 ──────────────────────────────────────────────
-        st.subheader("수식 정의")
-        formulas_5 = []
+        if advanced_mode_5:
+            # ── 수식 정의 (고급 모드) ─────────────────────────────────
+            st.subheader("수식 정의")
+            formulas_5 = []
 
-        for i in range(MAX_FORMULAS):
-            with st.expander(f"수식 {i + 1}", expanded=(i < 2)):
-                enabled = st.checkbox("활성화", value=(i == 0), key=f"f5_enabled_{i}")
-                if not enabled:
-                    formulas_5.append(None)
-                    continue
+            for i in range(MAX_FORMULAS):
+                with st.expander(f"수식 {i + 1}", expanded=(i < 2)):
+                    enabled = st.checkbox("활성화", value=(i == 0), key=f"f5_enabled_{i}")
+                    if not enabled:
+                        formulas_5.append(None)
+                        continue
 
-                ta_key = f"f5_ta_{i}"
+                    ta_key = f"f5_ta_{i}"
 
-                # ① 변수 선택 (카테고리 → 변수 2단계 선택) → 수식에 삽입
-                col_sel, col_ins = st.columns([5, 1])
-                with col_sel:
-                    # 1단계: 카테고리 선택
-                    cat_list = ["(전체)"] + sorted(VAR_META["카테고리"].unique().tolist())
-                    sel_cat = st.selectbox("카테고리", cat_list, key=f"cat_{i}")
+                    # ① 변수 선택 (카테고리 → 변수 2단계 선택) → 수식에 삽입
+                    col_sel, col_ins = st.columns([5, 1])
+                    with col_sel:
+                        # 1단계: 카테고리 선택
+                        cat_list = ["(전체)"] + sorted(VAR_META["카테고리"].unique().tolist())
+                        sel_cat = st.selectbox("카테고리", cat_list, key=f"cat_{i}")
 
-                    # 2단계: 카테고리 필터
-                    if sel_cat == "(전체)":
-                        filtered_meta = VAR_META[VAR_META["컬럼명"].isin(numeric_cols_5)].copy()
-                    else:
-                        filtered_meta = VAR_META[
-                            (VAR_META["카테고리"] == sel_cat) &
-                            (VAR_META["컬럼명"].isin(numeric_cols_5))
-                        ].copy()
-
-                    # 메타에 없는 컬럼 fallback
-                    meta_col_set = set(VAR_META["컬럼명"].tolist())
-                    extra_cols = [c for c in numeric_cols_5 if c not in meta_col_set]
-                    if sel_cat == "(전체)" and extra_cols:
-                        extra_rows = pd.DataFrame([
-                            {"표시명": c, "컬럼명": c, "카테고리": "(기타)", "출처": "-"}
-                            for c in extra_cols
-                        ])
-                        filtered_meta = pd.concat([filtered_meta, extra_rows], ignore_index=True)
-
-                    # 검색창 (표시명·설명 키워드 필터)
-                    _srch = st.text_input(
-                        "변수 검색", placeholder="예: 인구, 금리, KB …",
-                        key=f"f5_search_{i}", label_visibility="collapsed",
-                    )
-                    if _srch.strip():
-                        _smask = filtered_meta["표시명"].str.contains(_srch, case=False, na=False)
-                        if "설명" in filtered_meta.columns:
-                            _smask |= filtered_meta["설명"].fillna("").str.contains(_srch, case=False, na=False)
-                        filtered_meta = filtered_meta[_smask]
-
-                    # [출처] 접두사 라벨 생성
-                    filtered_meta = filtered_meta.copy()
-                    filtered_meta["_라벨"] = filtered_meta.apply(
-                        lambda r: f"[{r['출처']}] {r['표시명']}" if str(r.get("출처", "-")) not in ("", "-") else r["표시명"],
-                        axis=1,
-                    )
-
-                    disp_labels = filtered_meta["_라벨"].tolist() if not filtered_meta.empty else numeric_cols_5
-                    sel_disp = st.selectbox(
-                        "변수 선택 후 [삽입] 클릭",
-                        disp_labels,
-                        key=f"f5_selvar_{i}",
-                    )
-                    # 라벨 → 컬럼명 매핑
-                    _meta_match = filtered_meta[filtered_meta["_라벨"] == sel_disp]
-                    sel_var = _meta_match["컬럼명"].iloc[0] if not _meta_match.empty else sel_disp
-
-                    # 선택 변수 설명 표시 (출처는 이미 라벨에 포함)
-                    if not _meta_match.empty:
-                        _desc = _meta_match.iloc[0].get("설명", "")
-                        if _desc:
-                            st.caption(_desc)
-
-                with col_ins:
-                    st.write("")
-                    if st.button("삽입", key=f"f5_ins_{i}", use_container_width=True):
-                        cur = st.session_state.get(ta_key, "")
-                        sep = " " if cur and not cur.endswith(" ") else ""
-                        st.session_state[ta_key] = cur + sep + sel_var
-
-                # ② 프리셋 수식 템플릿
-                st.caption("수식 템플릿:")
-                _p_cols = st.columns(len(PRESETS_5))
-                for _pi, (_plbl, _pexpr, _punit) in enumerate(PRESETS_5):
-                    if _p_cols[_pi].button(_plbl, key=f"f5_preset_{i}_{_pi}", use_container_width=True):
-                        st.session_state[ta_key] = _pexpr
-                        st.session_state[f"f5_unit_{i}"] = _punit
-
-                # ③ 연산자 단축 버튼
-                st.caption("연산자 빠른 삽입:")
-                op_cols = st.columns(7)
-                for _j, (_lbl, _val) in enumerate([
-                    ("+", " + "), ("−", " - "), ("×", " * "), ("÷", " / "),
-                    ("(", " ("), (")", ") "), ("지우기", None),
-                ]):
-                    if op_cols[_j].button(_lbl, key=f"f5_op_{i}_{_j}", use_container_width=True):
-                        if _val is None:
-                            st.session_state[ta_key] = ""
+                        # 2단계: 카테고리 필터
+                        if sel_cat == "(전체)":
+                            filtered_meta = VAR_META[VAR_META["컬럼명"].isin(numeric_cols_5)].copy()
                         else:
-                            st.session_state[ta_key] = st.session_state.get(ta_key, "") + _val
+                            filtered_meta = VAR_META[
+                                (VAR_META["카테고리"] == sel_cat) &
+                                (VAR_META["컬럼명"].isin(numeric_cols_5))
+                            ].copy()
 
-                # ③ 수식 텍스트 입력 (직접 편집 가능)
-                formula_str = st.text_area(
-                    "수식 입력 (직접 편집 가능)",
-                    key=ta_key,
-                    height=80,
-                    placeholder="예: 평균가격 / GRDP * 12   또는   (전세_보증금평균 + 월세_보증금평균) / 총인구",
-                )
+                        # 메타에 없는 컬럼 fallback
+                        meta_col_set = set(VAR_META["컬럼명"].tolist())
+                        extra_cols = [c for c in numeric_cols_5 if c not in meta_col_set]
+                        if sel_cat == "(전체)" and extra_cols:
+                            extra_rows = pd.DataFrame([
+                                {"표시명": c, "컬럼명": c, "카테고리": "(기타)", "출처": "-"}
+                                for c in extra_cols
+                            ])
+                            filtered_meta = pd.concat([filtered_meta, extra_rows], ignore_index=True)
 
-                # ④ 실시간 수식 검증 (numexpr 기반 — RCE 취약점 차단)
-                if formula_str.strip() and not analysis_df.empty:
-                    _test_ns_ne = {
-                        col: analysis_df[col].astype(float).values
-                        for col in numeric_cols_5 if col in analysis_df.columns
-                    }
-                    try:
-                        with np.errstate(divide="ignore", invalid="ignore"):
-                            _res = ne.evaluate(formula_str, local_dict=_test_ns_ne)
-                        _res_s = pd.Series(_res).replace([np.inf, -np.inf], np.nan)
-                        _valid_n = _res_s.dropna().shape[0]
-                        _sample = _res_s.dropna()
-                        if _valid_n > 0:
-                            st.success(f"수식 유효  |  유효 데이터 {_valid_n}행  |  첫 유효값: {_sample.iloc[0]:,.4f}")
-                        else:
-                            st.success(f"수식 유효  |  결과: {float(_res):,.4f}")
-                    except Exception as _e:
-                        st.error(f"수식 오류: {_e}")
+                        # 검색창 (표시명·설명 키워드 필터)
+                        _srch = st.text_input(
+                            "변수 검색", placeholder="예: 인구, 금리, KB …",
+                            key=f"f5_search_{i}", label_visibility="collapsed",
+                        )
+                        if _srch.strip():
+                            _smask = filtered_meta["표시명"].str.contains(_srch, case=False, na=False)
+                            if "설명" in filtered_meta.columns:
+                                _smask |= filtered_meta["설명"].fillna("").str.contains(_srch, case=False, na=False)
+                            filtered_meta = filtered_meta[_smask]
 
-                # ⑤ 0 가능성 경고
-                if "/" in formula_str:
-                    _warned = [v for v in ZERO_PRONE_5 if v in formula_str]
-                    if _warned:
-                        st.warning(f"0이 될 수 있는 변수 포함: {', '.join(_warned)} → 0/inf는 NaN 처리됩니다.")
+                        # [출처] 접두사 라벨 생성
+                        filtered_meta = filtered_meta.copy()
+                        filtered_meta["_라벨"] = filtered_meta.apply(
+                            lambda r: f"[{r['출처']}] {r['표시명']}" if str(r.get("출처", "-")) not in ("", "-") else r["표시명"],
+                            axis=1,
+                        )
 
-                # ⑥ 수식 이름 및 단위
-                _col_nm, _col_ut = st.columns([3, 1])
-                with _col_nm:
-                    _default_lbl = (formula_str[:40] + "...") if len(formula_str) > 40 else formula_str
-                    label = st.text_input("수식 이름 (범례)", value=_default_lbl or f"수식{i+1}",
-                                         key=f"f5_label_{i}")
-                with _col_ut:
-                    unit = st.text_input("단위 (선택)", value="", key=f"f5_unit_{i}",
-                                        placeholder="만원, 배율 …")
+                        disp_labels = filtered_meta["_라벨"].tolist() if not filtered_meta.empty else numeric_cols_5
+                        sel_disp = st.selectbox(
+                            "변수 선택 후 [삽입] 클릭",
+                            disp_labels,
+                            key=f"f5_selvar_{i}",
+                        )
+                        # 라벨 → 컬럼명 매핑
+                        _meta_match = filtered_meta[filtered_meta["_라벨"] == sel_disp]
+                        sel_var = _meta_match["컬럼명"].iloc[0] if not _meta_match.empty else sel_disp
 
-                formulas_5.append({"expr": formula_str, "label": label, "unit": unit})
+                        # 선택 변수 설명 표시 (출처는 이미 라벨에 포함)
+                        if not _meta_match.empty:
+                            _desc = _meta_match.iloc[0].get("설명", "")
+                            if _desc:
+                                st.caption(_desc)
 
-        active_formulas_5 = [f for f in formulas_5 if f is not None and f["expr"].strip()]
+                    with col_ins:
+                        st.write("")
+                        if st.button("삽입", key=f"f5_ins_{i}", use_container_width=True):
+                            cur = st.session_state.get(ta_key, "")
+                            sep = " " if cur and not cur.endswith(" ") else ""
+                            st.session_state[ta_key] = cur + sep + sel_var
+
+                    # ② 프리셋 수식 템플릿
+                    st.caption("수식 템플릿:")
+                    _p_cols = st.columns(len(PRESETS_5))
+                    for _pi, (_plbl, _pexpr, _punit) in enumerate(PRESETS_5):
+                        if _p_cols[_pi].button(_plbl, key=f"f5_preset_{i}_{_pi}", use_container_width=True):
+                            st.session_state[ta_key] = _pexpr
+                            st.session_state[f"f5_unit_{i}"] = _punit
+
+                    # ③ 연산자 단축 버튼
+                    st.caption("연산자 빠른 삽입:")
+                    op_cols = st.columns(7)
+                    for _j, (_lbl, _val) in enumerate([
+                        ("+", " + "), ("−", " - "), ("×", " * "), ("÷", " / "),
+                        ("(", " ("), (")", ") "), ("지우기", None),
+                    ]):
+                        if op_cols[_j].button(_lbl, key=f"f5_op_{i}_{_j}", use_container_width=True):
+                            if _val is None:
+                                st.session_state[ta_key] = ""
+                            else:
+                                st.session_state[ta_key] = st.session_state.get(ta_key, "") + _val
+
+                    # ③ 수식 텍스트 입력 (직접 편집 가능)
+                    formula_str = st.text_area(
+                        "수식 입력 (직접 편집 가능)",
+                        key=ta_key,
+                        height=80,
+                        placeholder="예: 평균가격 / GRDP * 12   또는   (전세_보증금평균 + 월세_보증금평균) / 총인구",
+                    )
+
+                    # ④ 실시간 수식 검증 (numexpr 기반 — RCE 취약점 차단)
+                    if formula_str.strip() and not analysis_df.empty:
+                        _test_ns_ne = {
+                            col: analysis_df[col].astype(float).values
+                            for col in numeric_cols_5 if col in analysis_df.columns
+                        }
+                        try:
+                            with np.errstate(divide="ignore", invalid="ignore"):
+                                _res = ne.evaluate(formula_str, local_dict=_test_ns_ne)
+                            _res_s = pd.Series(_res).replace([np.inf, -np.inf], np.nan)
+                            _valid_n = _res_s.dropna().shape[0]
+                            _sample = _res_s.dropna()
+                            if _valid_n > 0:
+                                st.success(f"수식 유효  |  유효 데이터 {_valid_n}행  |  첫 유효값: {_sample.iloc[0]:,.4f}")
+                            else:
+                                st.success(f"수식 유효  |  결과: {float(_res):,.4f}")
+                        except Exception as _e:
+                            st.error(f"수식 오류: {_e}")
+
+                    # ⑤ 0 가능성 경고
+                    if "/" in formula_str:
+                        _warned = [v for v in ZERO_PRONE_5 if v in formula_str]
+                        if _warned:
+                            st.warning(f"0이 될 수 있는 변수 포함: {', '.join(_warned)} → 0/inf는 NaN 처리됩니다.")
+
+                    # ⑥ 수식 이름 및 단위
+                    _col_nm, _col_ut = st.columns([3, 1])
+                    with _col_nm:
+                        _default_lbl = (formula_str[:40] + "...") if len(formula_str) > 40 else formula_str
+                        label = st.text_input("수식 이름 (범례)", value=_default_lbl or f"수식{i+1}",
+                                             key=f"f5_label_{i}")
+                    with _col_ut:
+                        unit = st.text_input("단위 (선택)", value="", key=f"f5_unit_{i}",
+                                            placeholder="만원, 배율 …")
+
+                    formulas_5.append({"expr": formula_str, "label": label, "unit": unit})
+
+            active_formulas_5 = [f for f in formulas_5 if f is not None and f["expr"].strip()]
+        else:
+            # ── 프리셋 지표 선택 (기본 모드) ──────────────────────────
+            preset_labels_5 = [p[0] for p in PRESETS_5]
+            sel_preset_label = st.selectbox(
+                "프리셋 지표 선택", preset_labels_5, key="f5_preset_simple",
+            )
+            _preset_sel = next(p for p in PRESETS_5 if p[0] == sel_preset_label)
+            active_formulas_5 = [
+                {"expr": _preset_sel[1], "label": _preset_sel[0], "unit": _preset_sel[2]}
+            ]
 
         if not active_formulas_5:
             st.info("수식을 1개 이상 입력하고 활성화하세요.")
