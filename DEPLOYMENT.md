@@ -38,9 +38,9 @@ python -m py_compile app.py
 streamlit run app.py --server.headless true --server.port 8503
 ```
 
-Open `http://localhost:8503` and confirm the top tabs are:
+Open `http://localhost:8503` and confirm the 7 pages are:
 
-`Overview`, `수요공급분석`, `거래현황`, `매물찾기`, `적정값가상계산`.
+`🧭 Overview`, `🧭 수요공급분석`, `🧭 거래현황`, `🧭 매물현황`, `🔬 매수판단`, `🔬 적정가·구매력`, `🔬 자유차트`.
 
 ## Files Required At Deploy Time
 

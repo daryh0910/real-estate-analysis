@@ -9,7 +9,12 @@ import json
 import math
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
 from plotly.subplots import make_subplots
+import numexpr as ne
+
+# 릴리스 모드 — True: 게시판 글쓰기·파일업로드 비활성 (보안·안정성)
+RELEASE_READ_ONLY = True
 
 from buy_decision.schemas import PURPOSES
 from buy_decision.view_model import build_buy_decision_view_model
@@ -64,8 +69,78 @@ st.set_page_config(
     layout="wide",
 )
 
+# === 다크 프로(TradingView형) 전역 테마 CSS (2026-07-04) ===
+st.markdown(
+    """
+    <style>
+    :root{
+      --re-bg:#0E1117; --re-panel:#161B22; --re-border:#2A313C;
+      --re-text:#E6EDF3; --re-muted:#8B949E; --re-accent:#2962FF;
+      --re-up:#26A69A; --re-down:#EF5350;
+    }
+    html, body, [class*="css"]{ font-family:"Noto Sans KR","Pretendard",-apple-system,sans-serif; }
+    /* 상단 툴바(Deploy·메뉴) 숨김, 헤더 투명 */
+    [data-testid="stToolbar"], [data-testid="stAppDeployButton"], .stDeployButton{ display:none !important; }
+    header[data-testid="stHeader"]{ background:transparent; }
+    /* 본문 밀도 */
+    [data-testid="stMainBlockContainer"], .block-container{ padding-top:1.4rem; padding-bottom:2.5rem; max-width:1520px; }
+    /* 사이드바 */
+    section[data-testid="stSidebar"]{ background:var(--re-panel); border-right:1px solid var(--re-border); }
+    /* 제목 타이포 */
+    h1,h2,h3{ letter-spacing:-0.01em; font-weight:800; }
+    h1{ font-size:1.9rem; } h2{ font-size:1.4rem; }
+    /* 지표(metric) 카드화 */
+    [data-testid="stMetric"]{
+      background:var(--re-panel); border:1px solid var(--re-border);
+      border-radius:12px; padding:14px 16px;
+    }
+    [data-testid="stMetricValue"]{ font-weight:800; font-size:1.7rem; }
+    [data-testid="stMetricLabel"] p{ color:var(--re-muted); font-weight:600; }
+    /* 세그먼티드 컨트롤(탭 네비) */
+    [data-testid="stButtonGroup"] button{ border-radius:8px !important; font-weight:700; }
+    /* 차트·표 패널화 */
+    [data-testid="stPlotlyChart"]{
+      background:var(--re-panel); border:1px solid var(--re-border);
+      border-radius:12px; padding:8px 10px;
+    }
+    [data-testid="stDataFrame"]{ border:1px solid var(--re-border); border-radius:12px; }
+    /* expander 패널화 */
+    [data-testid="stExpander"]{ border:1px solid var(--re-border); border-radius:12px; background:var(--re-panel); }
+    /* 구분선 */
+    hr{ border-color:var(--re-border); }
+    /* 스크롤바 */
+    ::-webkit-scrollbar{ width:10px; height:10px; }
+    ::-webkit-scrollbar-thumb{ background:#30363d; border-radius:6px; }
+    ::-webkit-scrollbar-track{ background:transparent; }
+    /* 모바일 최소 대응 */
+    @media (max-width:768px){
+      [data-testid="stMainBlockContainer"],.block-container{ max-width:100% !important; padding:0.5rem !important; }
+      [data-testid="stMetricValue"]{ font-size:1.2rem !important; }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Streamlit Cloud (Linux) 한글 폰트 기본값 — packages.txt에 fonts-noto-cjk 설치 필요
 PLOTLY_FONT = dict(family="Noto Sans KR, Noto Sans CJK KR, sans-serif", size=12)
+
+# === 다크 프로(TradingView형) Plotly 템플릿 (2026-07-04) ===
+# 모든 차트에 전역 적용. 개별 figure가 template/색을 명시하지 않으면 이 값을 사용.
+pio.templates["re_dark"] = go.layout.Template(
+    layout=dict(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Noto Sans KR, Noto Sans CJK KR, sans-serif", size=12, color="#E6EDF3"),
+        colorway=["#2962FF", "#26A69A", "#EF5350", "#F5B301", "#AB47BC", "#26C6DA", "#66BB6A", "#FF7043"],
+        xaxis=dict(gridcolor="#222A35", zerolinecolor="#222A35", linecolor="#2A313C", tickfont=dict(color="#8B949E")),
+        yaxis=dict(gridcolor="#222A35", zerolinecolor="#222A35", linecolor="#2A313C", tickfont=dict(color="#8B949E")),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#C9D1D9")),
+        hoverlabel=dict(bgcolor="#161B22", font=dict(color="#E6EDF3", size=12), bordercolor="#2A313C"),
+        margin=dict(t=48, r=16, b=16, l=16),
+    )
+)
+pio.templates.default = "re_dark"
 
 
 INDICATOR_CATALOG = [
@@ -133,7 +208,8 @@ def get_data():
 try:
     data = get_data()
 except Exception as e:
-    st.error(f"데이터 로딩 실패: {e}")
+    print(f"[ERROR] 데이터 로딩 실패: {e}")
+    st.error("데이터를 불러올 수 없습니다. 잠시 후 새로고침하세요.")
     data = {}
 
 apt_df = data.get("apt", pd.DataFrame())
@@ -356,41 +432,35 @@ def _compute_formulas(
     _src_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    수식 문자열을 eval로 계산하여 캐싱.
+    수식 문자열을 numexpr로 계산하여 캐싱 (eval() 대신 사용 — RCE 취약점 원천 차단).
+    numexpr은 사칙연산·log/exp/sqrt/abs 등 수치 연산만 허용하며 속성 접근·함수 호출이 문법적으로 불가.
     _src_df: 언더스코어 접두어로 Streamlit 해싱 제외 (cache_key가 대신 무효화 담당)
     """
     src = _src_df.copy()
     if sido_list:
         src = src[src["시도"].isin(list(sido_list))]
 
-    _SAFE_GLOBALS = {
-        "__builtins__": {},
-        "abs": np.abs, "sqrt": np.sqrt,
-        "log": np.log, "log10": np.log10, "exp": np.exp,
-    }
-
     parts = []
     for sido_name, group in src.groupby("시도"):
         group = group.sort_values(time_col).reset_index(drop=True)
         row = group[[time_col, "시도"]].copy()
-        namespace = {**_SAFE_GLOBALS}
+        # numexpr local_dict: 변수명 → numpy array (pandas Series 자동 변환)
+        namespace_ne = {}
         for col in var_names:
             if col in group.columns:
-                namespace[col] = group[col].astype(float)
+                namespace_ne[col] = group[col].astype(float).values
         for label, expr in formula_strs:
             if not expr.strip():
                 row[label] = np.nan
                 continue
             try:
                 with np.errstate(divide="ignore", invalid="ignore"):
-                    result = eval(expr, {"__builtins__": {}}, namespace)
-                if isinstance(result, (int, float)):
+                    result = ne.evaluate(expr, local_dict=namespace_ne)
+                if result.ndim == 0:  # 스칼라 결과
                     row[label] = float(result)
-                elif hasattr(result, "values"):
-                    s = pd.Series(result.values, index=group.index)
-                    row[label] = s.replace([np.inf, -np.inf], np.nan).values
                 else:
-                    row[label] = np.nan
+                    s = pd.Series(result, index=group.index)
+                    row[label] = s.replace([np.inf, -np.inf], np.nan).values
             except Exception:
                 row[label] = np.nan
         parts.append(row)
@@ -417,6 +487,98 @@ _sel = st.segmented_control(
     label_visibility="collapsed",
 )
 _active = _sel or _PAGES[0]
+
+# === 전역 KPI 요약 바 — 모든 탭에서 항상 표시 ===
+def _render_kpi_bar():
+    _items = []
+
+    # 1. 시장 온도계
+    try:
+        _ms, _md, _ = compute_market_temperature(analysis_df)
+        _ml = "과열" if _ms > 60 else ("침체" if _ms < 40 else "중립")
+        _mc = "#EF5350" if _ms > 60 else ("#2962FF" if _ms < 40 else "#F5B301")
+        _items.append(("🌡️ 시장온도계", f"{_ms:.0f}", f"{_md:+.1f} {_ml}", _mc))
+    except Exception:
+        _items.append(("🌡️ 시장온도계", "N/A", "", "#8B949E"))
+
+    # 2. 평균가격  3. 거래량
+    if analysis_mode == "매매 분석" and not filtered_apt.empty and "연도" in filtered_apt.columns:
+        _yl = int(filtered_apt["연도"].max())
+        _yp = _yl - 1
+        _grp = filtered_apt.groupby("연도")
+        _pm = _grp["평균가격"].mean()
+        _pnow, _pprev = _pm.get(_yl), _pm.get(_yp)
+        if _pnow is not None:
+            _pd = f"YoY {(_pnow-_pprev)/_pprev*100:+.1f}%" if (_pprev and _pprev != 0) else ""
+            _items.append(("💰 평균가격", f"{_pnow:,.0f}만", _pd,
+                           "#26A69A" if (_pprev and _pnow > _pprev) else "#EF5350"))
+        else:
+            _items.append(("💰 평균가격", "N/A", "", "#8B949E"))
+        _vm = _grp["거래량"].sum()
+        _vnow, _vprev = _vm.get(_yl), _vm.get(_yp)
+        if _vnow is not None:
+            _vd = f"YoY {int(_vnow-_vprev):+,}건" if _vprev is not None else ""
+            _items.append(("📊 거래량", f"{int(_vnow):,}건", _vd,
+                           "#26A69A" if (_vprev is not None and _vnow > _vprev) else "#EF5350"))
+        else:
+            _items.append(("📊 거래량", "N/A", "", "#8B949E"))
+    else:
+        _items.append(("💰 평균가격", "N/A", "", "#8B949E"))
+        _items.append(("📊 거래량", "N/A", "", "#8B949E"))
+
+    # 4. 전세가율
+    try:
+        if "전세가율" in analysis_df.columns and "연도" in analysis_df.columns and not analysis_df.empty:
+            _jg = analysis_df.groupby("연도")["전세가율"].mean()
+            _jy = int(analysis_df["연도"].max())
+            _jr, _jp = _jg.get(_jy), _jg.get(_jy - 1)
+            if _jr is not None:
+                _jd = f"{_jr-_jp:+.1f}%p" if _jp is not None else ""
+                _items.append(("🏠 전세가율", f"{_jr:.1f}%", _jd,
+                               "#26A69A" if (_jp is not None and _jr > _jp) else "#EF5350"))
+            else:
+                _items.append(("🏠 전세가율", "N/A", "", "#8B949E"))
+        else:
+            _items.append(("🏠 전세가율", "N/A", "", "#8B949E"))
+    except Exception:
+        _items.append(("🏠 전세가율", "N/A", "", "#8B949E"))
+
+    # 5. KB 매수우위 or 주택가격전망CSI
+    try:
+        _kc = next((c for c in ["KB_매수우위지수", "주택가격전망CSI"]
+                    if c in analysis_df.columns and analysis_df[c].notna().any()), None)
+        if _kc and not analysis_df.empty:
+            _kv = float(analysis_df[_kc].dropna().iloc[-1])
+            _kl = "매수우위" if _kv > 100 else "매도우위"
+            _kname = "KB 매수우위" if "매수" in _kc else "가격전망CSI"
+            _items.append((f"💡 {_kname}", f"{_kv:.1f}",
+                           _kl, "#26A69A" if _kv > 100 else "#EF5350"))
+        else:
+            _items.append(("💡 KB매수우위", "N/A", "", "#8B949E"))
+    except Exception:
+        _items.append(("💡 KB매수우위", "N/A", "", "#8B949E"))
+
+    # HTML 렌더링
+    _cards = ""
+    for _lbl, _val, _dlt, _clr in _items:
+        _dlt_html = (f'<div style="font-size:11px;color:{_clr};margin-top:2px;">{_dlt}</div>'
+                     if _dlt else '<div style="font-size:11px;min-height:16px;"></div>')
+        _cards += f"""
+        <div style="flex:1;background:#161B22;border:1px solid #2A313C;border-radius:10px;
+                    padding:10px 14px;min-width:0;box-sizing:border-box;">
+          <div style="font-size:11px;color:#8B949E;font-weight:600;
+                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{_lbl}</div>
+          <div style="font-size:1.3rem;font-weight:800;color:#E6EDF3;
+                      line-height:1.2;margin-top:4px;letter-spacing:-0.02em;">{_val}</div>
+          {_dlt_html}
+        </div>"""
+    st.markdown(
+        f'<div style="display:flex;gap:10px;margin:10px 0 4px;">{_cards}</div>'
+        '<hr style="border:none;border-top:1px solid #2A313C;margin:12px 0 16px;">',
+        unsafe_allow_html=True,
+    )
+
+_render_kpi_bar()
 
 # 각 탭 변수는 이제 '활성 여부' 불리언이다. 아래 `if <탭>:` 블록은 alias를 그대로
 # 따르므로(예: main_tab6 = valuation_tab), 해당 페이지가 선택됐을 때만 실행된다.
@@ -1342,7 +1504,7 @@ if main_tab1:
                         color="밸류스코어",
                         color_continuous_scale=["#e74c3c", "#f1c40f", "#2ecc71"],  # 빨강→노랑→초록
                         range_color=[_map_df["밸류스코어"].quantile(0.05), _map_df["밸류스코어"].quantile(0.95)],
-                        mapbox_style="carto-positron",
+                        mapbox_style="carto-darkmatter",
                         center={"lat": 36.5, "lon": 127.8},
                         zoom=6,
                         hover_data=_hover_cols,
@@ -1442,7 +1604,8 @@ if main_tab1:
                     key="dl_value_score",
                 )
     except Exception as e:
-        st.error(f"밸류스코어 계산 오류: {e}")
+        print(f"[ERROR] 밸류스코어 계산 오류: {e}")
+        st.error("밸류스코어를 계산할 수 없습니다. 데이터 범위를 좁혀 다시 시도해 주세요.")
 
     st.divider()
 
@@ -1759,14 +1922,17 @@ if main_tab2:
     render_tab_usage_guide("거래현황")
     st.caption("실거래 흐름과 네이버 매물 호가를 같은 지역/단지 단위로 비교합니다.")
 
-    _naver_upload = st.file_uploader(
-        "네이버부동산 매물 CSV/JSON 업로드",
-        type=["csv", "json"],
-        key="naver_listing_upload",
-        help="반자동 수집 결과나 저장한 응답 파일을 업로드하면 표준 매물 테이블로 정규화합니다.",
-    )
-    if _naver_upload is not None:
-        st.session_state["naver_listings_df"] = parse_naver_listing_upload(_naver_upload)
+    if not RELEASE_READ_ONLY:
+        _naver_upload = st.file_uploader(
+            "네이버부동산 매물 CSV/JSON 업로드",
+            type=["csv", "json"],
+            key="naver_listing_upload",
+            help="반자동 수집 결과나 저장한 응답 파일을 업로드하면 표준 매물 테이블로 정규화합니다.",
+        )
+        if _naver_upload is not None:
+            st.session_state["naver_listings_df"] = parse_naver_listing_upload(_naver_upload)
+    else:
+        st.caption("💡 매물 파일 업로드는 추후 지원 예정입니다.")
 
     _naver_df = _clean_listing_df(st.session_state.get("naver_listings_df", pd.DataFrame()))
     if not _naver_df.empty:
@@ -2432,22 +2598,20 @@ if main_tab4:
                     placeholder="예: 평균가격 / GRDP * 12   또는   (전세_보증금평균 + 월세_보증금평균) / 총인구",
                 )
 
-                # ④ 실시간 수식 검증
+                # ④ 실시간 수식 검증 (numexpr 기반 — RCE 취약점 차단)
                 if formula_str.strip() and not analysis_df.empty:
-                    _test_ns = {
-                        col: analysis_df[col].astype(float)
+                    _test_ns_ne = {
+                        col: analysis_df[col].astype(float).values
                         for col in numeric_cols_5 if col in analysis_df.columns
                     }
-                    _test_ns.update({"__builtins__": {}, "abs": np.abs, "sqrt": np.sqrt,
-                                     "log": np.log, "log10": np.log10, "exp": np.exp})
                     try:
                         with np.errstate(divide="ignore", invalid="ignore"):
-                            _res = eval(formula_str, {"__builtins__": {}}, _test_ns)
-                        if hasattr(_res, "dropna"):
-                            _valid_n = _res.replace([np.inf, -np.inf], np.nan).dropna().shape[0]
-                            _sample = _res.replace([np.inf, -np.inf], np.nan).dropna()
-                            _hint = f"{_sample.iloc[0]:,.4f}" if len(_sample) > 0 else "없음"
-                            st.success(f"수식 유효  |  유효 데이터 {_valid_n}행  |  첫 유효값: {_hint}")
+                            _res = ne.evaluate(formula_str, local_dict=_test_ns_ne)
+                        _res_s = pd.Series(_res).replace([np.inf, -np.inf], np.nan)
+                        _valid_n = _res_s.dropna().shape[0]
+                        _sample = _res_s.dropna()
+                        if _valid_n > 0:
+                            st.success(f"수식 유효  |  유효 데이터 {_valid_n}행  |  첫 유효값: {_sample.iloc[0]:,.4f}")
                         else:
                             st.success(f"수식 유효  |  결과: {float(_res):,.4f}")
                     except Exception as _e:
@@ -3400,7 +3564,8 @@ if main_tab6:
                     st.plotly_chart(fig_imp, use_container_width=True)
     
                 except (ValueError, ImportError) as e:
-                    st.error(str(e))
+                    print(f"[ERROR] 회귀분석: {e}")
+                    st.error("분석을 완료할 수 없습니다. 변수 조합이나 데이터 범위를 변경해 주세요.")
             else:
                 st.info("독립변수를 1개 이상 선택하세요.")
     
@@ -3602,7 +3767,8 @@ if main_tab7:
                         st.plotly_chart(fig_radar, use_container_width=True)
     
                 except (ValueError, ImportError) as e:
-                    st.error(str(e))
+                    print(f"[ERROR] 클러스터링: {e}")
+                    st.error("분석을 완료할 수 없습니다. 변수 조합이나 데이터 범위를 변경해 주세요.")
             else:
                 st.info("변수를 2개 이상 선택하세요.")
     
@@ -3668,9 +3834,10 @@ if main_tab7:
                             }), use_container_width=True)
     
                 except (ValueError, ImportError) as e:
-                    st.error(str(e))
-    
-    
+                    print(f"[ERROR] Granger 인과성: {e}")
+                    st.error("분석을 완료할 수 없습니다. 변수 조합이나 데이터 범위를 변경해 주세요.")
+
+
     # ============================
     # Tab 8: 가격 예측 (Prophet)
     # ============================
@@ -4736,28 +4903,29 @@ if main_tab11:
                 st.text(c["content"])
                 st.markdown("---")
 
-            with st.form(key=f"comment_form_{post['id']}"):
-                c_author = st.text_input("닉네임", key="cmt_author")
-                c_content = st.text_area("댓글 내용", key="cmt_content", height=80)
-                if st.form_submit_button("댓글 등록"):
-                    if c_author and c_content:
-                        add_comment(post["id"], c_author, c_content)
-                        st.rerun()
-                    else:
-                        st.warning("닉네임과 내용을 모두 입력하세요.")
-
-            # 삭제
-            st.divider()
-            with st.expander("게시글 삭제"):
-                del_pw = st.text_input("비밀번호 확인", type="password", key="del_pw")
-                if st.button("삭제", key="del_btn"):
-                    if del_pw:
-                        if delete_post(post["id"], del_pw):
-                            st.success("삭제되었습니다.")
-                            st.session_state["board_view"] = ("gallery",)
+            if not RELEASE_READ_ONLY:
+                with st.form(key=f"comment_form_{post['id']}"):
+                    c_author = st.text_input("닉네임", key="cmt_author")
+                    c_content = st.text_area("댓글 내용", key="cmt_content", height=80)
+                    if st.form_submit_button("댓글 등록"):
+                        if c_author and c_content:
+                            add_comment(post["id"], c_author, c_content)
                             st.rerun()
                         else:
-                            st.error("비밀번호가 일치하지 않습니다.")
+                            st.warning("닉네임과 내용을 모두 입력하세요.")
+
+                # 삭제
+                st.divider()
+                with st.expander("게시글 삭제"):
+                    del_pw = st.text_input("비밀번호 확인", type="password", key="del_pw")
+                    if st.button("삭제", key="del_btn"):
+                        if del_pw:
+                            if delete_post(post["id"], del_pw):
+                                st.success("삭제되었습니다.")
+                                st.session_state["board_view"] = ("gallery",)
+                                st.rerun()
+                            else:
+                                st.error("비밀번호가 일치하지 않습니다.")
     else:
         # --- 갤러리 뷰 ---
         total = get_post_count()
@@ -4800,34 +4968,54 @@ if main_tab11:
 # --- 게시판 저장 위젯 (사이드바) ---
 with st.sidebar:
     st.divider()
-    st.subheader("📌 게시판에 저장")
-    board_figs = st.session_state.get("_board_figures", {})
-    if board_figs:
-        fig_options = list(board_figs.keys())
-        save_chart = st.selectbox(
-            "저장할 차트",
-            options=fig_options,
-            format_func=lambda k: f"[{board_figs[k]['tab_name']}] {k}",
-            key="board_sel_chart",
-        )
-        save_title = st.text_input("제목", key="board_save_title")
-        save_desc = st.text_area("설명 (선택)", key="board_save_desc", height=80)
-        save_author = st.text_input("닉네임", key="board_save_author")
-        save_pw = st.text_input("비밀번호", type="password", key="board_save_pw",
-                                help="수정/삭제 시 필요")
-        if st.button("게시판에 저장", key="board_save_btn", type="primary"):
-            if save_title and save_author and save_pw:
-                from board import create_post, capture_current_settings
-                entry = board_figs[save_chart]
-                settings = capture_current_settings()
-                post_id = create_post(
-                    title=save_title, description=save_desc,
-                    author=save_author, password=save_pw,
-                    tab_name=entry["tab_name"], fig=entry["fig"],
-                    settings=settings,
-                )
-                st.success(f"저장 완료! (#{post_id})")
-            else:
-                st.warning("제목, 닉네임, 비밀번호를 모두 입력하세요.")
-    else:
-        st.info("차트가 표시되면 저장할 수 있습니다.")
+    if not RELEASE_READ_ONLY:
+        st.subheader("📌 게시판에 저장")
+        board_figs = st.session_state.get("_board_figures", {})
+        if board_figs:
+            fig_options = list(board_figs.keys())
+            save_chart = st.selectbox(
+                "저장할 차트",
+                options=fig_options,
+                format_func=lambda k: f"[{board_figs[k]['tab_name']}] {k}",
+                key="board_sel_chart",
+            )
+            save_title = st.text_input("제목", key="board_save_title")
+            save_desc = st.text_area("설명 (선택)", key="board_save_desc", height=80)
+            save_author = st.text_input("닉네임", key="board_save_author")
+            save_pw = st.text_input("비밀번호", type="password", key="board_save_pw",
+                                    help="수정/삭제 시 필요")
+            if st.button("게시판에 저장", key="board_save_btn", type="primary"):
+                if save_title and save_author and save_pw:
+                    from board import create_post, capture_current_settings
+                    entry = board_figs[save_chart]
+                    settings = capture_current_settings()
+                    post_id = create_post(
+                        title=save_title, description=save_desc,
+                        author=save_author, password=save_pw,
+                        tab_name=entry["tab_name"], fig=entry["fig"],
+                        settings=settings,
+                    )
+                    st.success(f"저장 완료! (#{post_id})")
+                else:
+                    st.warning("제목, 닉네임, 비밀번호를 모두 입력하세요.")
+        else:
+            st.info("차트가 표시되면 저장할 수 있습니다.")
+
+    # --- 글로벌 면책 배너 ---
+    _data_max_month = "N/A"
+    try:
+        if not apt_df.empty and "연월" in apt_df.columns:
+            _data_max_month = str(apt_df["연월"].max())
+        elif not apt_df.empty and "연도" in apt_df.columns:
+            _data_max_month = f"{int(apt_df['연도'].max())}년"
+    except Exception:
+        pass
+    st.markdown(
+        f"""<div style="margin-top:16px;padding:10px 12px;background:#161B22;
+        border:1px solid #2A313C;border-radius:8px;font-size:11px;color:#8B949E;line-height:1.6;">
+        ⚠️ <b>면책 고지</b><br>
+        본 서비스는 공공데이터 기반 <b>참고 자료</b>이며, 투자 판단의 근거로 사용될 수 없습니다.
+        데이터 기준: <b>{_data_max_month}</b>. 실제 투자 전 별도 전문가 확인이 필요합니다.
+        </div>""",
+        unsafe_allow_html=True,
+    )

@@ -1,6 +1,16 @@
 [browser]
 gatherUsageStats = false
 
+[client]
+showErrorDetails = false
+
+[server]
+maxUploadSize = 20
+
 [theme]
-base = "light"
+base = "dark"
+primaryColor = "#2962FF"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#161B22"
+textColor = "#E6EDF3"
 font = "sans serif"
