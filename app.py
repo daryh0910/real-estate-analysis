@@ -2420,13 +2420,14 @@ if main_tab4:
         src = row.iloc[0].get("출처", "")
         return f"[{src}] {label}" if src else label
 
-    with st.expander("변수 목록 및 메타데이터"):
-        # 카테고리/출처/설명 컬럼 포함하여 표시
-        st.dataframe(VAR_META, use_container_width=True, hide_index=True)
-        st.caption(
-            "연집계룰: 월별→연별 변환 시 적용 기준.  "
-            "가중평균 = 거래량 기준 가중산술평균 / last = 해당 연도 마지막 월값 / sum = 월 합산."
-        )
+    if advanced_mode_5:
+        with st.expander("변수 목록 및 메타데이터"):
+            # 카테고리/출처/설명 컬럼 포함하여 표시
+            st.dataframe(VAR_META, use_container_width=True, hide_index=True)
+            st.caption(
+                "연집계룰: 월별→연별 변환 시 적용 기준.  "
+                "가중평균 = 거래량 기준 가중산술평균 / last = 해당 연도 마지막 월값 / sum = 월 합산."
+            )
 
     # ── 수식 빌더에 사용할 변수 목록 ──────────────────────────────
     time_col_5 = "연월" if freq == "월별" and "연월" in analysis_df.columns else "연도"
