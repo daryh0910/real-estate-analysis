@@ -2801,70 +2801,70 @@ if main_tab4:
                 )
 
     st.divider()
-    st.header("전세-매매 선행 신호")
-    st.caption("전세와 매매 중 무엇이 먼저 움직였고, 그 뒤 다른 지표가 따라온 패턴이 반복됐는지 확인합니다.")
+    with st.expander("전세-매매 선행 신호", expanded=False):
+        st.caption("전세와 매매 중 무엇이 먼저 움직였고, 그 뒤 다른 지표가 따라온 패턴이 반복됐는지 확인합니다.")
 
-    lead_src = filtered_monthly if not filtered_monthly.empty else filtered_yearly
-    lead_time_col = "연월" if "연월" in lead_src.columns else "연도"
-    if lead_src.empty or "평균가격" not in lead_src.columns or "전세_보증금평균" not in lead_src.columns:
-        st.info("전세-매매 선행 신호를 계산하려면 매매가격과 전세보증금 데이터가 모두 필요합니다.")
-    else:
-        ll_c1, ll_c2, ll_c3 = st.columns(3)
-        with ll_c1:
-            ll_max_lag = st.slider("최대 몇 기간까지 먼저 움직였는지", 1, 12, 6, key="lead_lag_max")
-        with ll_c2:
-            ll_regions = st.multiselect(
-                "지역",
-                sorted(lead_src["시도"].dropna().unique()),
-                default=(selected_sido[:3] if selected_sido else ["서울"] if "서울" in lead_src["시도"].unique() else []),
-                key="lead_lag_regions",
-            )
-        with ll_c3:
-            ll_use_change = st.checkbox("변화율 기준으로 보기", value=True, key="lead_lag_pct")
-
-        ll_input = lead_src[lead_src["시도"].isin(ll_regions)].copy() if ll_regions else lead_src.copy()
-        ll_df = compute_lead_lag_signal(
-            ll_input,
-            sale_col="평균가격",
-            jeonse_col="전세_보증금평균",
-            time_col=lead_time_col,
-            max_lag=ll_max_lag,
-            use_pct_change=ll_use_change,
-        )
-        if ll_df.empty:
-            st.warning("선행 신호를 계산할 표본이 부족합니다.")
+        lead_src = filtered_monthly if not filtered_monthly.empty else filtered_yearly
+        lead_time_col = "연월" if "연월" in lead_src.columns else "연도"
+        if lead_src.empty or "평균가격" not in lead_src.columns or "전세_보증금평균" not in lead_src.columns:
+            st.info("전세-매매 선행 신호를 계산하려면 매매가격과 전세보증금 데이터가 모두 필요합니다.")
         else:
-            ll_best = ll_df.iloc[0]
-            s1, s2, s3, s4 = st.columns(4)
-            s1.metric("가장 뚜렷한 지역", ll_best["지역"])
-            s2.metric("선행 방향", ll_best["선행방향"])
-            s3.metric("먼저 움직인 기간", f"{int(ll_best['먼저움직인기간'])}")
-            s4.metric("반복성", ll_best["반복성"])
+            ll_c1, ll_c2, ll_c3 = st.columns(3)
+            with ll_c1:
+                ll_max_lag = st.slider("최대 몇 기간까지 먼저 움직였는지", 1, 12, 6, key="lead_lag_max")
+            with ll_c2:
+                ll_regions = st.multiselect(
+                    "지역",
+                    sorted(lead_src["시도"].dropna().unique()),
+                    default=(selected_sido[:3] if selected_sido else ["서울"] if "서울" in lead_src["시도"].unique() else []),
+                    key="lead_lag_regions",
+                )
+            with ll_c3:
+                ll_use_change = st.checkbox("변화율 기준으로 보기", value=True, key="lead_lag_pct")
 
-            display_cols = [
-                "지역", "선행방향", "먼저움직인기간", "같이움직인정도",
-                "통계신뢰도", "반복성", "표본수", "요약",
-            ]
-            st.dataframe(
-                ll_df[[c for c in display_cols if c in ll_df.columns]].style.format({
-                    "같이움직인정도": "{:.3f}",
-                    "통계신뢰도": "{:.1%}",
-                }, na_rep="N/A"),
-                use_container_width=True,
-                height=280,
+            ll_input = lead_src[lead_src["시도"].isin(ll_regions)].copy() if ll_regions else lead_src.copy()
+            ll_df = compute_lead_lag_signal(
+                ll_input,
+                sale_col="평균가격",
+                jeonse_col="전세_보증금평균",
+                time_col=lead_time_col,
+                max_lag=ll_max_lag,
+                use_pct_change=ll_use_change,
             )
+            if ll_df.empty:
+                st.warning("선행 신호를 계산할 표본이 부족합니다.")
+            else:
+                ll_best = ll_df.iloc[0]
+                s1, s2, s3, s4 = st.columns(4)
+                s1.metric("가장 뚜렷한 지역", ll_best["지역"])
+                s2.metric("선행 방향", ll_best["선행방향"])
+                s3.metric("먼저 움직인 기간", f"{int(ll_best['먼저움직인기간'])}")
+                s4.metric("반복성", ll_best["반복성"])
 
-            fig_ll = px.bar(
-                ll_df,
-                x="지역",
-                y="같이움직인정도",
-                color="선행방향",
-                hover_data=["먼저움직인기간", "반복성", "통계신뢰도"],
-                title="지역별 전세-매매 선행 신호",
-            )
-            fig_ll.add_hline(y=0, line_dash="dash", line_color="gray")
-            register_fig("전세매매_선행신호", fig_ll, "수요공급분석")
-            st.plotly_chart(fig_ll, use_container_width=True)
+                display_cols = [
+                    "지역", "선행방향", "먼저움직인기간", "같이움직인정도",
+                    "통계신뢰도", "반복성", "표본수", "요약",
+                ]
+                st.dataframe(
+                    ll_df[[c for c in display_cols if c in ll_df.columns]].style.format({
+                        "같이움직인정도": "{:.3f}",
+                        "통계신뢰도": "{:.1%}",
+                    }, na_rep="N/A"),
+                    use_container_width=True,
+                    height=280,
+                )
+
+                fig_ll = px.bar(
+                    ll_df,
+                    x="지역",
+                    y="같이움직인정도",
+                    color="선행방향",
+                    hover_data=["먼저움직인기간", "반복성", "통계신뢰도"],
+                    title="지역별 전세-매매 선행 신호",
+                )
+                fig_ll.add_hline(y=0, line_dash="dash", line_color="gray")
+                register_fig("전세매매_선행신호", fig_ll, "수요공급분석")
+                st.plotly_chart(fig_ll, use_container_width=True)
 
 
 # ============================
