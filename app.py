@@ -2678,7 +2678,7 @@ if main_tab4:
             }.get(chart_mode_5, "값")
 
             # ── 통합 차트: 모든 수식을 하나의 차트에 ──────────────
-            st.subheader("통합 차트 (수식 1~4 한 화면)")
+            st.subheader("통합 차트 (수식 1~4 한 화면)" if advanced_mode_5 else "지표 차트")
             if chart_mode_5 == "원값" and len(active_formulas_5) > 1:
                 st.caption(
                     "원값 모드에서 수식 간 단위/스케일이 다를 경우 가독성이 떨어질 수 있습니다. "
