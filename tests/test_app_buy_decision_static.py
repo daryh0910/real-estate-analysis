@@ -18,15 +18,20 @@ def _buy_decision_block() -> str:
     return source[start:] if next_marker == -1 else source[start:next_marker]
 
 
-def test_buy_decision_tab_is_inserted_immediately_after_overview():
-    source = _source()
-    assert "매수판단" in source
+def test_buy_decision_and_leader_are_in_segmented_navigation():
+    tree = ast.parse(_source())
+    pages = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "_PAGES" for target in node.targets
+        ):
+            pages = ast.literal_eval(node.value)
+            break
 
-    tab_call = re.search(r"st\.tabs\(\s*\[(.*?)\]\s*\)", source, flags=re.S)
-    assert tab_call, "상위 st.tabs 목록을 찾을 수 없습니다"
-    tab_labels = re.findall(r"[\"']([^\"']+)[\"']", tab_call.group(1))
-
-    assert tab_labels[:2] == ["Overview", "매수판단"]
+    assert pages is not None, "상위 segmented navigation 목록을 찾을 수 없습니다"
+    assert pages[0] == "🧭 Overview"
+    assert "🔬 매수판단" in pages
+    assert pages.index("🧭 대장아파트") == pages.index("🧭 거래현황") + 1
 
 
 def test_app_imports_buy_decision_view_model_or_region_compare():

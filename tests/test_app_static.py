@@ -53,9 +53,26 @@ def test_listing_price_parser_replaces_old_first_number_extraction():
 def test_top_level_tab_usage_guides_are_visible_to_users():
     source = APP_PATH.read_text(encoding="utf-8")
 
-    for tab_name in ["Overview", "매수판단", "수요공급분석", "거래현황", "매물현황", "자유차트"]:
+    for tab_name in ["Overview", "매수판단", "수요공급분석", "거래현황", "대장아파트", "매물현황", "자유차트"]:
         assert f'"{tab_name}"' in source
         assert f'render_tab_usage_guide("{tab_name}")' in source
 
     assert "처음 보는 분을 위한 사용법" in source
     assert "**예시**" in source
+
+
+def test_leader_apartment_page_contract_is_present():
+    source = APP_PATH.read_text(encoding="utf-8")
+
+    for text in [
+        '"🧭 대장아파트"',
+        'leader_apt_tab',
+        'get_apt_complex_data()',
+        'select_leader_apartments(',
+        'get_leader_apartment_flow(',
+        '"대장아파트_가격거래량"',
+        '"평균 평당가격"',
+        '"거래량"',
+        '"선정 기준과 주의사항"',
+    ]:
+        assert text in source
