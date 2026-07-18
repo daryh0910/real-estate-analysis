@@ -1,0 +1,312 @@
+{
+  "generated_at": "2026-07-10T21:45:28.067498+00:00",
+  "project_root": "/home/younghwan/WSL/90_개인/real_estate_analysis",
+  "app": {
+    "navigation_mode": "segmented_control",
+    "primary_navigation": [
+      "🧭 Overview",
+      "🧭 수요공급분석",
+      "🧭 거래현황",
+      "🧭 매물현황",
+      "🔬 매수판단",
+      "🔬 적정가·구매력",
+      "🔬 자유차트"
+    ],
+    "checks": {
+      "primary_navigation_found": true,
+      "overview_first": true,
+      "buy_present": true
+    },
+    "status": "pass"
+  },
+  "data_inventory": [
+    {
+      "path": "cache/apt_sigungu_monthly.parquet",
+      "size_bytes": 1226842,
+      "modified_at": "2026-06-18T13:13:11.343845+00:00",
+      "suffix": ".parquet"
+    },
+    {
+      "path": "cache/apt_sigungu_monthly_detail.parquet",
+      "size_bytes": 17180452,
+      "modified_at": "2026-05-01T03:28:01.883861+00:00",
+      "suffix": ".parquet"
+    },
+    {
+      "path": "cache/jeonse_sigungu_monthly.parquet",
+      "size_bytes": 836028,
+      "modified_at": "2026-06-18T13:14:33.882480+00:00",
+      "suffix": ".parquet"
+    },
+    {
+      "path": "cache/kosis_population_age_sido_yearly.csv",
+      "size_bytes": 28823,
+      "modified_at": "2026-05-03T01:48:44.580123+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "cache/kosis_population_age_sigungu_yearly.csv",
+      "size_bytes": 411630,
+      "modified_at": "2026-04-04T09:03:04.204327+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "cache/rent_all_sigungu_monthly.parquet",
+      "size_bytes": 1223906,
+      "modified_at": "2026-06-18T13:17:15.316328+00:00",
+      "suffix": ".parquet"
+    },
+    {
+      "path": "cache/sgis_house_sido_yearly.csv",
+      "size_bytes": 86,
+      "modified_at": "2026-04-04T08:20:38.581059+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "cache/sgis_household_sido_yearly.csv",
+      "size_bytes": 113,
+      "modified_at": "2026-04-04T08:20:38.153379+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "cache/sgis_population_sido_yearly.csv",
+      "size_bytes": 331,
+      "modified_at": "2026-04-04T08:20:37.790265+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "cache/wolse_sigungu_monthly.parquet",
+      "size_bytes": 1114615,
+      "modified_at": "2026-06-18T13:15:44.676220+00:00",
+      "suffix": ".parquet"
+    },
+    {
+      "path": "data/base_rate_monthly.csv",
+      "size_bytes": 12806,
+      "modified_at": "2026-03-25T23:06:56.504155+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/bok_housing_loan_sido_monthly.csv",
+      "size_bytes": 284930,
+      "modified_at": "2026-03-25T23:06:56.691191+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/cluster.csv",
+      "size_bytes": 438,
+      "modified_at": "2026-03-25T23:07:44.431803+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/construction_pipeline_sido_monthly.csv",
+      "size_bytes": 159720,
+      "modified_at": "2026-06-17T13:55:56+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/csi_monthly.csv",
+      "size_bytes": 3573,
+      "modified_at": "2026-06-17T13:55:47+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/grdp.csv",
+      "size_bytes": 44673,
+      "modified_at": "2026-03-25T23:07:44.359174+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/housing_price_index_sido_monthly.csv",
+      "size_bytes": 17553,
+      "modified_at": "2026-03-25T23:06:56.574079+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/jeonwolse_conversion_rate_sido_monthly.csv",
+      "size_bytes": 74157,
+      "modified_at": "2026-03-25T23:06:56.612214+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/kb_indicators_national_monthly.csv",
+      "size_bytes": 4191,
+      "modified_at": "2026-06-17T13:55:59+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/kb_indicators_regional_monthly.csv",
+      "size_bytes": 83736,
+      "modified_at": "2026-06-17T13:55:59+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/kb_market_supply_demand_monthly.csv",
+      "size_bytes": 59288,
+      "modified_at": "2026-06-17T13:55:58+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/kosis_household_asset_quintile_yearly.csv",
+      "size_bytes": 8226,
+      "modified_at": "2026-06-17T13:47:01.332930+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/kosis_household_asset_sido_yearly.csv",
+      "size_bytes": 3417,
+      "modified_at": "2026-03-28T05:13:38.393040+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/land_price_change_sido_monthly.csv",
+      "size_bytes": 67057,
+      "modified_at": "2026-06-17T13:55:56+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/nps_sigungu_monthly.csv",
+      "size_bytes": 206549,
+      "modified_at": "2026-03-26T05:15:28+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/nts_income_sigungu_yearly.csv",
+      "size_bytes": 234014,
+      "modified_at": "2026-06-17T13:47:01.347785+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/permit.csv",
+      "size_bytes": 265998,
+      "modified_at": "2026-03-25T23:07:44.405381+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/policy_events.csv",
+      "size_bytes": 8022,
+      "modified_at": "2026-03-30T13:56:26.153203+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/policy_research/korea_mortgage_ltv_dsr_timeline.csv",
+      "size_bytes": 11897,
+      "modified_at": "2026-06-17T22:02:30.246474+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/pop/201312_201512_연령별인구현황_연간.csv",
+      "size_bytes": 854461,
+      "modified_at": "2026-03-25T23:07:44.487243+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/pop/201612_201812_연령별인구현황_연간.csv",
+      "size_bytes": 851619,
+      "modified_at": "2026-03-25T23:07:44.529040+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/pop/201912_202112_연령별인구현황_연간.csv",
+      "size_bytes": 840210,
+      "modified_at": "2026-03-25T23:07:44.566242+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/population_migration_sido_monthly.csv",
+      "size_bytes": 87966,
+      "modified_at": "2026-06-17T14:04:46+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/metadata/source_registry.csv",
+      "size_bytes": 848,
+      "modified_at": "2026-05-12T08:21:55+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/movein_plan_complex_monthly.csv",
+      "size_bytes": 505534,
+      "modified_at": "2026-05-12T08:21:55+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/raw/public_files/15032289.csv",
+      "size_bytes": 2385,
+      "modified_at": "2026-05-12T08:18:10+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/raw/public_files/15033976.csv",
+      "size_bytes": 53623,
+      "modified_at": "2026-05-12T08:17:14+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/raw/public_files/15040743.csv",
+      "size_bytes": 124,
+      "modified_at": "2026-05-12T08:17:12+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/raw/public_files/15055106.csv",
+      "size_bytes": 32345,
+      "modified_at": "2026-05-12T08:18:09+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/raw/public_files/15063216.csv",
+      "size_bytes": 205319,
+      "modified_at": "2026-05-12T08:18:08+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/raw/public_files/15064155.csv",
+      "size_bytes": 246,
+      "modified_at": "2026-05-12T08:18:12+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/raw/public_files/15108016.csv",
+      "size_bytes": 32589,
+      "modified_at": "2026-05-12T08:17:13+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/raw/public_files/15111714.csv",
+      "size_bytes": 72600,
+      "modified_at": "2026-05-12T08:18:08+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/raw/public_files/15116841.csv",
+      "size_bytes": 20822,
+      "modified_at": "2026-05-12T08:18:11+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/raw/public_files/15141761.csv",
+      "size_bytes": 29279,
+      "modified_at": "2026-05-12T08:17:11+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/raw/public_files/3079705.csv",
+      "size_bytes": 3808,
+      "modified_at": "2026-05-12T08:17:11+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/supply/validation/movein_seed_validation_summary.csv",
+      "size_bytes": 158,
+      "modified_at": "2026-05-12T08:21:55+00:00",
+      "suffix": ".csv"
+    },
+    {
+      "path": "data/unsold_housing_sido_monthly.csv",
+      "size_bytes": 99473,
+      "modified_at": "2026-03-25T23:06:56.648417+00:00",
+      "suffix": ".csv"
+    }
+  ]
+}
