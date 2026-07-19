@@ -89,7 +89,7 @@ def test_leader_apartment_page_contract_is_present():
         assert text in source
 
 
-def test_leader_apartment_loader_is_streamlit_hot_reload_safe():
+def test_leader_apartment_loader_is_hot_reload_and_cloud_memory_safe():
     source = APP_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)
 
@@ -100,8 +100,16 @@ def test_leader_apartment_loader_is_streamlit_hot_reload_safe():
         for alias in node.names
     }
     assert "load_apt_complex_data" not in imported_from_data_loader
-    assert 'getattr(_data_loader, "load_apt_complex_data", None)' in source
+    assert '@st.cache_data(show_spinner=False, max_entries=3)' in source
+    assert '"apt_sigungu_monthly.parquet"' in source
     assert '"apt_complex_monthly.parquet"' in source
+    assert '("시도", "==", str(sido))' in source
+    assert '("연월", ">=", str(start_period))' in source
+    assert '("연월", "<=", str(end_period))' in source
+    assert 'pd.read_parquet(cache_path, columns=columns, filters=filters)' in source
+    assert 'leader_sido_df = get_apt_complex_data(' in source
+    assert 'get_leader_apartment_flow(\n                leader_sido_df,' in source
+    assert 'get_region_market_flow(\n                leader_sido_df,' in source
 
 
 def test_leader_apartment_helpers_are_streamlit_hot_reload_safe():

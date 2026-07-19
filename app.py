@@ -241,25 +241,44 @@ def get_data():
     return load_all_data()
 
 
-@st.cache_data(show_spinner=False)
-def get_apt_complex_data():
-    """대장아파트 페이지에서만 지연 로딩하는 단지 월별 캐시.
+@st.cache_data(show_spinner=False, max_entries=3)
+def get_apt_complex_data(
+    sido: str | None = None,
+    start_period: str | None = None,
+    end_period: str | None = None,
+):
+    """대장아파트 메타데이터 또는 선택 기간의 단지 월별 캐시.
 
     Streamlit Cloud가 app.py만 먼저 핫리로드한 경우 기존 data_loader
-    모듈에 신규 함수가 아직 없을 수 있어, 실행 시점에 함수를 조회한다.
+    모듈에 신규 함수가 아직 없을 수 있어 캐시 파일을 직접 읽는다.
+    전체 341만 행을 올리지 않고 Parquet 필터를 적용해 Cloud 메모리를 제한한다.
     """
-    loader = getattr(_data_loader, "load_apt_complex_data", None)
-    if callable(loader):
-        return loader()
-
-    cache_path = os.path.join(
+    cache_dir = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         "cache",
-        "apt_complex_monthly.parquet",
     )
-    if os.path.exists(cache_path):
-        return pd.read_parquet(cache_path)
-    return pd.DataFrame()
+    if sido is None:
+        metadata_path = os.path.join(cache_dir, "apt_sigungu_monthly.parquet")
+        if not os.path.exists(metadata_path):
+            return pd.DataFrame()
+        metadata = pd.read_parquet(metadata_path, columns=["시도", "연월"])
+        return metadata.dropna().drop_duplicates().reset_index(drop=True)
+
+    if start_period is None or end_period is None:
+        raise ValueError("단지 캐시를 읽으려면 시작월과 종료월이 필요합니다.")
+    cache_path = os.path.join(cache_dir, "apt_complex_monthly.parquet")
+    if not os.path.exists(cache_path):
+        return pd.DataFrame()
+    columns = [
+        "시도", "지역코드", "법정동", "아파트", "연월",
+        "평균가격", "거래량", "평균단가_per_m2",
+    ]
+    filters = [
+        ("시도", "==", str(sido)),
+        ("연월", ">=", str(start_period)),
+        ("연월", "<=", str(end_period)),
+    ]
+    return pd.read_parquet(cache_path, columns=columns, filters=filters)
 
 
 def rebuild_apt_complex_data():
@@ -2387,10 +2406,10 @@ if leader_apt_tab:
                 key="leader_sido",
             )
 
-        leader_sido_df = leader_complex_df[leader_complex_df["시도"] == leader_sido]
+        leader_period_df = leader_complex_df[leader_complex_df["시도"] == leader_sido]
         leader_period_options = sorted(
             pd.to_datetime(
-                leader_sido_df["연월"].astype(str), format="%Y-%m", errors="coerce"
+                leader_period_df["연월"].astype(str), format="%Y-%m", errors="coerce"
             ).dropna().dt.strftime("%Y-%m").unique().tolist()
         )
         if not leader_period_options:
@@ -2420,6 +2439,20 @@ if leader_apt_tab:
                 "최소 거래건수", min_value=1, max_value=50, value=3, step=1,
                 key="leader_min_transactions",
             )
+
+        try:
+            with st.spinner("선택 기간의 단지별 실거래를 불러오는 중..."):
+                leader_sido_df = get_apt_complex_data(
+                    leader_sido,
+                    leader_start_period,
+                    leader_end_period,
+                )
+        except Exception as exc:
+            print(f"[ERROR] 대장아파트 캐시 로딩 실패: {exc}")
+            leader_sido_df = pd.DataFrame()
+        if leader_sido_df.empty:
+            st.warning("선택한 시도·기간의 단지별 실거래 캐시가 없습니다.")
+            st.stop()
 
         leader_rank = select_leader_apartments(
             leader_sido_df,
@@ -2594,7 +2627,7 @@ if leader_apt_tab:
                 leader_rank["지역코드"].astype(str) == str(selected_leader_code)
             ].iloc[0]
             leader_flow = get_leader_apartment_flow(
-                leader_complex_df,
+                leader_sido_df,
                 selected_leader_code,
                 selected_leader["법정동"],
                 selected_leader["아파트"],
@@ -2602,7 +2635,7 @@ if leader_apt_tab:
                 end_period=leader_end_period,
             )
             leader_region_flow = get_region_market_flow(
-                leader_complex_df,
+                leader_sido_df,
                 selected_leader_code,
                 start_period=leader_start_period,
                 end_period=leader_end_period,
