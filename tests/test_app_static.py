@@ -76,3 +76,18 @@ def test_leader_apartment_page_contract_is_present():
         '"선정 기준과 주의사항"',
     ]:
         assert text in source
+
+
+def test_leader_apartment_loader_is_streamlit_hot_reload_safe():
+    source = APP_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    imported_from_data_loader = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "data_loader"
+        for alias in node.names
+    }
+    assert "load_apt_complex_data" not in imported_from_data_loader
+    assert 'getattr(_data_loader, "load_apt_complex_data", None)' in source
+    assert '"apt_complex_monthly.parquet"' in source

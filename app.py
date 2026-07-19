@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
 import numexpr as ne
+import data_loader as _data_loader
 
 # 릴리스 모드 — True: 게시판 글쓰기·파일업로드 비활성 (보안·안정성)
 RELEASE_READ_ONLY = True
@@ -21,7 +22,6 @@ from buy_decision.view_model import build_buy_decision_view_model
 from data_loader import (
     get_sigungu_name,
     load_all_data,
-    load_apt_complex_data,
     load_apt_data,
     load_rent_data,
 )
@@ -214,8 +214,31 @@ def get_data():
 
 @st.cache_data(show_spinner=False)
 def get_apt_complex_data():
-    """대장아파트 페이지에서만 지연 로딩하는 단지 월별 캐시."""
-    return load_apt_complex_data()
+    """대장아파트 페이지에서만 지연 로딩하는 단지 월별 캐시.
+
+    Streamlit Cloud가 app.py만 먼저 핫리로드한 경우 기존 data_loader
+    모듈에 신규 함수가 아직 없을 수 있어, 실행 시점에 함수를 조회한다.
+    """
+    loader = getattr(_data_loader, "load_apt_complex_data", None)
+    if callable(loader):
+        return loader()
+
+    cache_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "cache",
+        "apt_complex_monthly.parquet",
+    )
+    if os.path.exists(cache_path):
+        return pd.read_parquet(cache_path)
+    return pd.DataFrame()
+
+
+def rebuild_apt_complex_data():
+    """로컬 캐시 재빌드. 핫리로드 중 구버전이면 빈 결과를 반환한다."""
+    loader = getattr(_data_loader, "load_apt_complex_data", None)
+    if not callable(loader):
+        return pd.DataFrame()
+    return loader(force_rebuild=True)
 
 
 try:
@@ -251,7 +274,7 @@ if st.sidebar.button("Rebuild Cache"):
     with st.sidebar:
         with st.spinner("캐시 재빌드 중..."):
             load_apt_data(force_rebuild=True)
-            load_apt_complex_data(force_rebuild=True)
+            rebuild_apt_complex_data()
             load_rent_data("jeonse", force_rebuild=True)
             load_rent_data("wolse", force_rebuild=True)
             load_rent_data("all", force_rebuild=True)
