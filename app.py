@@ -7,12 +7,14 @@ import numpy as np
 import os
 import json
 import math
+import importlib
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
 import numexpr as ne
 import data_loader as _data_loader
+import leader_apartment as _leader_apartment
 
 # 릴리스 모드 — True: 게시판 글쓰기·파일업로드 비활성 (보안·안정성)
 RELEASE_READ_ONLY = True
@@ -24,13 +26,6 @@ from data_loader import (
     load_all_data,
     load_apt_data,
     load_rent_data,
-)
-from leader_apartment import (
-    extract_selected_region_code,
-    get_leader_apartment_flow,
-    get_region_market_flow,
-    map_region_code,
-    select_leader_apartments,
 )
 from board import (
     init_db,
@@ -74,6 +69,34 @@ from tax_calculator import (
     calc_acquisition_tax,
     calc_capital_gains_tax,
     calc_investment_return,
+)
+
+# Streamlit Cloud가 app.py를 보조 모듈보다 먼저 핫리로드해도
+# 전체 앱이 ImportError로 중단되지 않도록 실행 시점에 헬퍼를 조회한다.
+try:
+    importlib.invalidate_caches()
+    _leader_apartment = importlib.reload(_leader_apartment)
+except Exception as exc:
+    print(f"[WARN] 대장아파트 보조 모듈 재로드 대기: {exc}")
+
+extract_selected_region_code = getattr(
+    _leader_apartment, "extract_selected_region_code", None
+)
+get_leader_apartment_flow = getattr(
+    _leader_apartment, "get_leader_apartment_flow", None
+)
+get_region_market_flow = getattr(_leader_apartment, "get_region_market_flow", None)
+map_region_code = getattr(_leader_apartment, "map_region_code", None)
+select_leader_apartments = getattr(_leader_apartment, "select_leader_apartments", None)
+LEADER_HELPERS_READY = all(
+    callable(helper)
+    for helper in (
+        extract_selected_region_code,
+        get_leader_apartment_flow,
+        get_region_market_flow,
+        map_region_code,
+        select_leader_apartments,
+    )
 )
 
 st.set_page_config(
@@ -2330,6 +2353,9 @@ if main_tab3:
 if leader_apt_tab:
     st.header("구별 대장아파트")
     render_tab_usage_guide("대장아파트")
+    if not LEADER_HELPERS_READY:
+        st.info("배포 파일을 동기화하고 있습니다. 잠시 후 새로고침해 주세요.")
+        st.stop()
     st.caption(
         "선택한 시작·종료월 사이의 구별 거래량 상위 30% 단지 중 최소 거래건수를 충족하고, "
         "거래량 가중 평균 평당가격이 가장 높은 단지를 선정합니다."

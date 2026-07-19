@@ -104,6 +104,41 @@ def test_leader_apartment_loader_is_streamlit_hot_reload_safe():
     assert '"apt_complex_monthly.parquet"' in source
 
 
+def test_leader_apartment_helpers_are_streamlit_hot_reload_safe():
+    source = APP_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    imported_from_leader = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "leader_apartment"
+        for alias in node.names
+    }
+    assert not imported_from_leader
+    assert "import leader_apartment as _leader_apartment" in source
+    assert "importlib.reload(_leader_apartment)" in source
+    lazy_helper_names = {
+        node.args[1].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) >= 3
+        and isinstance(node.args[0], ast.Name)
+        and node.args[0].id == "_leader_apartment"
+        and isinstance(node.args[1], ast.Constant)
+    }
+    for helper in {
+        "extract_selected_region_code",
+        "get_leader_apartment_flow",
+        "get_region_market_flow",
+        "map_region_code",
+        "select_leader_apartments",
+    }:
+        assert helper in lazy_helper_names
+    assert "if not LEADER_HELPERS_READY:" in source
+
+
 def test_leader_apartment_uses_one_month_range_for_selection_and_both_flows():
     block = _leader_apartment_block()
 
