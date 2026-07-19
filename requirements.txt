@@ -1,3 +1,4 @@
+# 260719 v3.3 Cloud 메모리 최적화 재빌드 기준
 streamlit==1.55.0
 pandas
 numexpr
