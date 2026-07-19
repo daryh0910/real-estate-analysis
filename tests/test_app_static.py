@@ -5,6 +5,16 @@ from pathlib import Path
 APP_PATH = Path(__file__).resolve().parents[1] / "app.py"
 
 
+def _leader_apartment_block() -> str:
+    source = APP_PATH.read_text(encoding="utf-8")
+    start = source.find("# Page: 대장아파트")
+    assert start != -1, "대장아파트 페이지 블록 주석이 필요합니다"
+    body_start = source.find("if leader_apt_tab:", start)
+    assert body_start != -1, "대장아파트 페이지 본문이 필요합니다"
+    next_marker = source.find("# ============================", body_start)
+    return source[start:] if next_marker == -1 else source[start:next_marker]
+
+
 def _indicator_catalog_columns():
     tree = ast.parse(APP_PATH.read_text(encoding="utf-8"))
     for node in tree.body:
@@ -70,8 +80,9 @@ def test_leader_apartment_page_contract_is_present():
         'get_apt_complex_data()',
         'select_leader_apartments(',
         'get_leader_apartment_flow(',
-        '"대장아파트_가격거래량"',
-        '"평균 평당가격"',
+        'get_region_market_flow(',
+        '"대장아파트_지역단지흐름"',
+        '"평균평당가격"',
         '"거래량"',
         '"선정 기준과 주의사항"',
     ]:
@@ -91,3 +102,56 @@ def test_leader_apartment_loader_is_streamlit_hot_reload_safe():
     assert "load_apt_complex_data" not in imported_from_data_loader
     assert 'getattr(_data_loader, "load_apt_complex_data", None)' in source
     assert '"apt_complex_monthly.parquet"' in source
+
+
+def test_leader_apartment_uses_one_month_range_for_selection_and_both_flows():
+    block = _leader_apartment_block()
+
+    assert 'leader_start_period, leader_end_period = st.select_slider(' in block
+    assert 'leader_period_options[-min(24, len(leader_period_options))]' in block
+    assert 'key="leader_period_range"' in block
+    assert block.count('start_period=leader_start_period') == 3
+    assert block.count('end_period=leader_end_period') == 3
+    assert 'select_leader_apartments(' in block
+    assert 'get_leader_apartment_flow(' in block
+    assert 'get_region_market_flow(' in block
+
+
+def test_leader_apartment_map_is_selectable_and_keeps_original_region_code():
+    block = _leader_apartment_block()
+
+    for text in [
+        '"geo_data", "sigungu.geojson"',
+        'px.choropleth_map(',
+        'featureidkey="properties.SIG_CD"',
+        'color="평균평당가격"',
+        'custom_data=["지역코드"]',
+        'leader_rank["지도지역코드"] = leader_rank["지역코드"].apply(map_region_code)',
+        'key="leader_apartment_map"',
+        'on_select=_sync_leader_map_selection',
+        'selection_mode="points"',
+        'extract_selected_region_code(',
+        'st.session_state["leader_region_code"] = str(selected_code)',
+        '지도에서 제외된 지역',
+        '실제 좌표가 아닌 시군구 행정구역',
+    ]:
+        assert text in block
+
+    assert 'leader_map_views = {' in block
+    assert 'width="stretch"' in block
+
+
+def test_leader_apartment_flow_compares_region_and_complex_on_two_axes():
+    block = _leader_apartment_block()
+
+    for trace_name in [
+        'name="지역 전체 거래량"',
+        'name="대장단지 거래량"',
+        'name="지역 전체 평당가"',
+        'name="대장단지 평당가"',
+    ]:
+        assert trace_name in block
+
+    assert 'make_subplots(specs=[[{"secondary_y": True}]])' in block
+    assert 'register_fig("대장아파트_지역단지흐름"' in block
+    assert 'st.plotly_chart(leader_fig, width="stretch")' in block
