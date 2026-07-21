@@ -496,7 +496,11 @@ def download_data(data_type, region_codes, date_range, progress, dry_run=False, 
                     time.sleep(sleep_sec)
 
                 except requests.exceptions.RequestException as e:
-                    print(f"\n  [NET ERROR] code={code} date={ym}: {e}")
+                    # 요청 예외 문자열에는 serviceKey가 포함된 전체 URL이 들어갈 수 있다.
+                    print(
+                        f"\n  [NET ERROR] code={code} date={ym}: "
+                        f"{type(e).__name__}"
+                    )
                     errors += 1
                     if errors >= 5:
                         print(f"\n[WARN] 네트워크 에러 {errors}회. 진행상황 저장 후 중단.")

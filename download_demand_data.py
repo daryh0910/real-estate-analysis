@@ -110,10 +110,12 @@ def _api_get(url, params=None, retries=3, delay=1.0):
             return resp
         except requests.RequestException as e:
             if attempt < retries - 1:
-                print(f"  재시도 ({attempt+1}/{retries}): {e}")
+                print(f"  재시도 ({attempt+1}/{retries}): {type(e).__name__}")
                 time.sleep(delay * (attempt + 1))
             else:
-                raise
+                raise RuntimeError(
+                    f"수요데이터 API 요청 실패: {type(e).__name__}"
+                ) from None
 
 
 # ═══════════════════════════════════════════════════════
@@ -500,7 +502,7 @@ def fetch_kosis_household_asset(start_year=2012, end_year=2024):
     print("=" * 60)
 
     api_key = _get_kosis_key()
-    print(f"  API Key: {api_key[:8]}...")
+    print("  KOSIS API Key: 설정됨")
 
     raw_data = None
     used_tbl = None
@@ -981,7 +983,7 @@ def fetch_nts_income_data(start_year=2016, end_year=2024):
     print("=" * 60)
 
     api_key = _get_kosis_key()
-    print(f"  API Key: {api_key[:8]}...")
+    print("  KOSIS API Key: 설정됨")
 
     # KOSIS 40,000셀 제한 확인
     # 1년당: 247(지역) x 4(항목) x 2(인원/금액) = 1,976행

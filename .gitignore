@@ -15,6 +15,8 @@ __pycache__/
 *.zip
 *.html
 *.log
+codex/260720_실거래캐시_최신화_codex/
+codex/260720_주요지표_최신화_codex/
 
 # IDE/OS
 .vscode/
