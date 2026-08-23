@@ -6,23 +6,26 @@
     python download_public_data.py --unsold       # 미분양만
     python download_public_data.py --migration    # 인구이동만
     python download_public_data.py --rate         # 기준금리만
+    python download_public_data.py --jeonwolse --dry-run
     python download_public_data.py --construction # 주택건설실적만
     python download_public_data.py --land-price   # 지가변동률만
     python download_public_data.py --csi          # 소비자심리지수(CSI)만
 
 출력 파일:
-    {DEMAND_DIR}/unsold_housing_sido_monthly.csv
-    {DEMAND_DIR}/population_migration_sido_monthly.csv
-    {DEMAND_DIR}/base_rate_monthly.csv
-    {DEMAND_DIR}/construction_pipeline_sido_monthly.csv
-    {DEMAND_DIR}/land_price_change_sido_monthly.csv
-    {DEMAND_DIR}/csi_monthly.csv
+    {OUTPUT_DIR}/unsold_housing_sido_monthly.csv
+    {OUTPUT_DIR}/population_migration_sido_monthly.csv
+    {OUTPUT_DIR}/base_rate_monthly.csv
+    {OUTPUT_DIR}/construction_pipeline_sido_monthly.csv
+    {OUTPUT_DIR}/land_price_change_sido_monthly.csv
+    {OUTPUT_DIR}/csi_monthly.csv
 """
 
 import os
 import sys
 import time
 import argparse
+import tempfile
+from datetime import date, timedelta
 import requests
 import pandas as pd
 import numpy as np
@@ -46,9 +49,31 @@ def _detect_onedrive():
     raise FileNotFoundError(f"OneDrive 경로를 찾을 수 없습니다. 패턴: {pattern}")
 
 
-BASE_ONEDRIVE = _detect_onedrive()
-BACKDATA = os.path.join(BASE_ONEDRIVE, "실거래_데이터/BackData(거래이외 Table)")
-OUTPUT_DIR = os.path.join(BACKDATA, "수요/수요_집계")
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+OUTPUT_DIR = PROJECT_DATA_DIR
+
+
+def _onedrive_output_dir():
+    """--onedrive를 명시했을 때만 기존 OneDrive 출력 경로를 탐색한다."""
+    backdata = os.path.join(
+        _detect_onedrive(), "실거래_데이터/BackData(거래이외 Table)"
+    )
+    return os.path.join(backdata, "수요/수요_집계")
+
+
+def _previous_month_yyyymm(today=None):
+    """실행일을 기준으로 직전 달을 YYYYMM 형식으로 반환한다."""
+    today = today or date.today()
+    previous_month = today.replace(day=1) - timedelta(days=1)
+    return previous_month.strftime("%Y%m")
+
+
+def _parse_yyyymm(value):
+    """argparse용 YYYYMM 형식 검증."""
+    if len(value) != 6 or not value.isdigit() or not 1 <= int(value[4:6]) <= 12:
+        raise argparse.ArgumentTypeError("YYYYMM 형식으로 입력하세요")
+    return value
 
 # API 키 — 환경변수 또는 .env 파일에서 로드
 DATA_GO_KR_KEY = os.environ.get("DATA_GO_KR_KEY", "")
@@ -594,7 +619,7 @@ _JEONWOLSE_SIDO_C2 = {
 _JEONWOLSE_KOSIS_URL = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
 
 
-def fetch_jeonwolse_rate(start_ym="201201", end_ym="202603"):
+def fetch_jeonwolse_rate(start_ym="201201", end_ym=None):
     """
     KOSIS 한국부동산원 → 시도별 아파트 전월세전환율 (연이율 %)
     통계표: DT_30404_N0010 (지역별 전월세전환율, orgId=408)
@@ -605,6 +630,11 @@ def fetch_jeonwolse_rate(start_ym="201201", end_ym="202603"):
     print("=" * 60)
     print("[4] 전월세전환율 수집 (KOSIS 한국부동산원 DT_30404_N0010)")
     print("=" * 60)
+
+    if end_ym is None:
+        end_ym = _previous_month_yyyymm()
+    print(f"  원천: KOSIS orgId=408, tblId=DT_30404_N0010")
+    print(f"  요청 기간: {start_ym} ~ {end_ym}")
 
     kosis_key = os.environ.get("KOSIS_API_KEY", "")
     if not kosis_key:
@@ -699,6 +729,13 @@ def fetch_jeonwolse_rate(start_ym="201201", end_ym="202603"):
     print(f"  저장: {out_path}")
     print(f"    행 수: {len(result):,}, 시도 수: {result['시도'].nunique()}, "
           f"기간: {result['연월'].min()} ~ {result['연월'].max()}")
+    seoul = result[result["시도"] == "서울"].sort_values("연월")
+    if not seoul.empty:
+        latest = seoul.iloc[-1]
+        print(
+            f"    서울 최신값: {latest['전월세전환율']:.9g}% "
+            f"({latest['연월']})"
+        )
 
     return result
 
@@ -1707,7 +1744,9 @@ def fetch_household_credit(start_ym="200001", end_ym="202612"):
 # Main
 # ═══════════════════════════════════════════════════════
 
-def main():
+def main(argv=None):
+    global OUTPUT_DIR
+
     parser = argparse.ArgumentParser(
         description="공공데이터 API 수집: 미분양, 인구이동, 금리, 전월세전환율, 가격지수, 주택건설실적, 지가변동률, CSI, M2, 예대금리차, 가계신용"
     )
@@ -1722,7 +1761,28 @@ def main():
     parser.add_argument("--m2", action="store_true", help="M2 광의통화만")
     parser.add_argument("--spread", action="store_true", help="예대금리차만")
     parser.add_argument("--household-credit", action="store_true", help="가계신용잔액+연체율만")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--jeonwolse-start", type=_parse_yyyymm, default="201201", metavar="YYYYMM",
+        help="전월세전환율 시작월 (기본: 201201)",
+    )
+    parser.add_argument(
+        "--jeonwolse-end", type=_parse_yyyymm, default=None, metavar="YYYYMM",
+        help="전월세전환율 종료월 (기본: 실행일 기준 전월)",
+    )
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument(
+        "--output-dir", metavar="PATH",
+        help="명시적 출력 경로 (미지정 시 프로젝트 data/)",
+    )
+    output_group.add_argument(
+        "--onedrive", action="store_true",
+        help="기존 OneDrive 수요_집계를 명시적 출력으로 선택",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="API는 호출하되 운영 파일 대신 임시 경로에만 저장하고 종료 시 제거",
+    )
+    args = parser.parse_args(argv)
 
     run_all = not (args.unsold or args.migration or args.rate
                    or args.jeonwolse or args.price_index
@@ -1730,7 +1790,36 @@ def main():
                    or args.csi or args.m2 or args.spread
                    or args.household_credit)
 
-    print(f"\n데이터 출력 디렉토리: {OUTPUT_DIR}\n")
+    if args.onedrive:
+        selected_output_dir = _onedrive_output_dir()
+        output_mode = "OneDrive (명시 선택)"
+    elif args.output_dir:
+        selected_output_dir = os.path.abspath(os.path.expanduser(args.output_dir))
+        output_mode = "사용자 지정"
+    else:
+        selected_output_dir = PROJECT_DATA_DIR
+        output_mode = "프로젝트 data/ (기본)"
+
+    print(f"\n선택된 운영 출력 디렉토리: {selected_output_dir}")
+    print(f"출력 모드: {output_mode}")
+
+    if args.dry_run:
+        with tempfile.TemporaryDirectory(prefix="real_estate_public_dry_run_") as temp_dir:
+            OUTPUT_DIR = temp_dir
+            print("DRY-RUN: API는 호출하지만 운영 출력 파일은 쓰지 않습니다.")
+            print(f"DRY-RUN 임시 출력 디렉토리: {OUTPUT_DIR}\n")
+            try:
+                return _run_selected(args, run_all)
+            finally:
+                OUTPUT_DIR = selected_output_dir
+
+    OUTPUT_DIR = selected_output_dir
+    print(f"데이터 출력 디렉토리: {OUTPUT_DIR}\n")
+    return _run_selected(args, run_all)
+
+
+def _run_selected(args, run_all):
+    """선택된 수집 작업을 실행한다."""
 
     results = {}
 
@@ -1744,7 +1833,10 @@ def main():
         results["rate"] = fetch_base_rate()
 
     if run_all or args.jeonwolse:
-        results["jeonwolse"] = fetch_jeonwolse_rate()
+        results["jeonwolse"] = fetch_jeonwolse_rate(
+            start_ym=args.jeonwolse_start,
+            end_ym=args.jeonwolse_end,
+        )
 
     if run_all or args.price_index:
         results["price_index"] = fetch_housing_price_index()

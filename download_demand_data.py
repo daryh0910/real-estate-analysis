@@ -8,13 +8,11 @@
     python download_demand_data.py --kosis     # KOSIS 가계자산만
     python download_demand_data.py --nts       # 국세청 근로소득만
     python download_demand_data.py --quintile  # KOSIS 소득5분위별 가계자산만
+    python download_demand_data.py --kb --dry-run  # 파일 변경 없이 KB 검증
 
 출력 파일:
-    {BACKDATA}/수요/수요_집계/nps_sigungu_monthly.csv
-    {BACKDATA}/수요/수요_집계/bok_housing_loan_sido_monthly.csv
-    {BACKDATA}/수요/수요_집계/kosis_household_asset_sido_yearly.csv
-    {BACKDATA}/수요/수요_집계/kosis_household_asset_quintile_yearly.csv
-    {BACKDATA}/수요/수요_집계/nts_income_sigungu_yearly.csv
+    기본: {프로젝트 루트}/data/
+    선택: --output-dir PATH 또는 --onedrive
 """
 
 import os
@@ -23,6 +21,7 @@ import time
 import json
 import argparse
 import subprocess
+import tempfile
 import requests
 import pandas as pd
 import numpy as np
@@ -45,13 +44,22 @@ def _detect_onedrive():
     raise FileNotFoundError(f"OneDrive 경로를 찾을 수 없습니다. 패턴: {pattern}")
 
 
-BASE_ONEDRIVE = _detect_onedrive()
-BACKDATA = os.path.join(BASE_ONEDRIVE, "실거래_데이터/BackData(거래이외 Table)")
-NPS_DIR = os.path.join(BACKDATA, "수요/#2. 수요_정책이외/2.유효수요/국민연금")
-OUTPUT_DIR = os.path.join(BACKDATA, "수요/수요_집계")
-KEY_XLSX = os.path.join(
-    BASE_ONEDRIVE, "5. coding/##. 250719_전달파일/250711_주요인증키.xlsx"
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+ONEDRIVE_BACKDATA_REL = "실거래_데이터/BackData(거래이외 Table)"
+ONEDRIVE_OUTPUT_REL = os.path.join(ONEDRIVE_BACKDATA_REL, "수요/수요_집계")
+NPS_SOURCE_REL = os.path.join(
+    ONEDRIVE_BACKDATA_REL, "수요/#2. 수요_정책이외/2.유효수요/국민연금"
 )
+KEY_XLSX_REL = "5. coding/##. 250719_전달파일/250711_주요인증키.xlsx"
+
+# 기본 출력은 항상 프로젝트 data/. OneDrive 출력은 --onedrive로만 선택한다.
+OUTPUT_DIR = PROJECT_DATA_DIR
+
+
+def _onedrive_path(relative_path):
+    """명시적으로 필요한 OneDrive 입력/출력 경로를 지연 해석한다."""
+    return os.path.join(_detect_onedrive(), relative_path)
 
 BOK_API_KEY = os.environ.get("BOK_API_KEY", "")
 BOK_BASE_URL = "https://ecos.bok.or.kr/api"
@@ -74,7 +82,9 @@ def _get_kosis_key():
     # 로컬 엑셀 파일에서 추출 시도 (fallback)
     try:
         import openpyxl
-        wb = openpyxl.load_workbook(KEY_XLSX, data_only=True)
+        wb = openpyxl.load_workbook(
+            _onedrive_path(KEY_XLSX_REL), data_only=True
+        )
         ws = wb.active
         for row in ws.iter_rows(values_only=True):
             for i, cell in enumerate(row):
@@ -133,17 +143,18 @@ NPS_USECOLS = [
 ]
 
 
-def _find_nps_files():
+def _find_nps_files(nps_dir=None):
     """NPS CSV 파일 탐색 (합본 + 합본 이후 개별 파일 모두 반환)"""
+    nps_dir = nps_dir or _onedrive_path(NPS_SOURCE_REL)
     result_files = []
 
     # 1) 합본 파일
-    merged = os.path.join(NPS_DIR, "combine_NPS", "merged2_files.csv")
+    merged = os.path.join(nps_dir, "combine_NPS", "merged2_files.csv")
     if os.path.exists(merged):
         result_files.append(merged)
 
     # 2) 개별 파일 (합본에 포함되지 않은 최신 파일 추가)
-    individual = sorted(_glob.glob(os.path.join(NPS_DIR, "국민연금*.csv")))
+    individual = sorted(_glob.glob(os.path.join(nps_dir, "국민연금*.csv")))
     # 합본이 있으면 합본 이후 파일만 추가 (파일명에 2024 이후 포함)
     if result_files:
         for f in individual:
@@ -155,7 +166,7 @@ def _find_nps_files():
 
     if not result_files:
         # fallback: 모든 csv
-        all_csv = sorted(_glob.glob(os.path.join(NPS_DIR, "*.csv")))
+        all_csv = sorted(_glob.glob(os.path.join(nps_dir, "*.csv")))
         return all_csv
 
     return result_files
@@ -170,9 +181,10 @@ def process_nps_data(chunksize=200_000):
     print("[1/3] 국민연금 CSV 전처리")
     print("=" * 60)
 
-    nps_files = _find_nps_files()
+    nps_dir = _onedrive_path(NPS_SOURCE_REL)
+    nps_files = _find_nps_files(nps_dir)
     if not nps_files:
-        print(f"  NPS CSV 파일 없음: {NPS_DIR}")
+        print(f"  NPS CSV 파일 없음: {nps_dir}")
         return None
 
     print(f"  대상 파일: {len(nps_files)}개")
@@ -1205,7 +1217,48 @@ _KB_SIDO_MAP = {
     "경기": "경기", "강원": "강원", "충북": "충북", "충남": "충남",
     "전북": "전북", "전남": "전남", "경북": "경북", "경남": "경남",
     "제주": "제주",
+    "서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구",
+    "인천광역시": "인천", "광주광역시": "광주", "대전광역시": "대전",
+    "울산광역시": "울산", "세종특별자치시": "세종", "경기도": "경기",
+    "강원도": "강원", "강원특별자치도": "강원",
+    "충청북도": "충북", "충청남도": "충남",
+    "전라북도": "전북", "전북특별자치도": "전북",
+    "전라남도": "전남", "경상북도": "경북", "경상남도": "경남",
+    "제주도": "제주", "제주특별자치도": "제주",
 }
+
+_KB_STANDARD_SIDOS = (
+    "서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종",
+    "경기", "강원", "충북", "충남", "전북", "전남", "경북", "경남",
+    "제주",
+)
+
+
+def _normalize_kb_sido(region_name):
+    """KB의 축약명·공식명·`(구)` 접두 표기를 프로젝트 시도명으로 통일한다."""
+    if pd.isna(region_name):
+        return None
+    normalized = str(region_name).strip()
+    while normalized.startswith("(구)"):
+        normalized = normalized[len("(구)"):].strip()
+    return _KB_SIDO_MAP.get(normalized)
+
+
+def _select_kb_sido_rows(df):
+    """시도 행만 남기고 같은 시도·날짜에서는 현행 명칭을 우선한다."""
+    result = df.copy()
+    raw_names = result["지역명"].astype("string").str.strip()
+    result["시도"] = raw_names.apply(_normalize_kb_sido)
+    result["_구표기"] = raw_names.str.startswith("(구)", na=False)
+    result = result.dropna(subset=["시도"])
+
+    # KB는 광주와 (구)광주광역시를 같은 날짜에 함께 제공한다. 현행 표기를
+    # 우선해 중복을 막되, 현행 표기가 없는 (구)전라남도는 전남으로 보존한다.
+    if "날짜" in result.columns:
+        result = result.sort_values("_구표기", kind="stable")
+        result = result.drop_duplicates(subset=["시도", "날짜"], keep="first")
+
+    return result.drop(columns=["_구표기"])
 
 
 def fetch_kb_market_data():
@@ -1232,8 +1285,7 @@ def fetch_kb_market_data():
         df_buy = api.get_market_trend(
             메뉴코드="01", 월간주간구분코드="01", 매물종별구분="01", 기간="5"
         )
-        df_buy = df_buy[df_buy["지역명"].isin(_KB_SIDO_MAP.keys())].copy()
-        df_buy["시도"] = df_buy["지역명"].map(_KB_SIDO_MAP)
+        df_buy = _select_kb_sido_rows(df_buy)
         df_buy["날짜"] = pd.to_datetime(df_buy["날짜"])
         df_buy["연월"] = df_buy["날짜"].dt.strftime("%Y-%m")
         df_buy = df_buy.rename(columns={"매수우위지수": "KB_매수우위지수"})
@@ -1248,8 +1300,7 @@ def fetch_kb_market_data():
         df_trade = api.get_market_trend(
             메뉴코드="02", 월간주간구분코드="01", 매물종별구분="01", 기간="5"
         )
-        df_trade = df_trade[df_trade["지역명"].isin(_KB_SIDO_MAP.keys())].copy()
-        df_trade["시도"] = df_trade["지역명"].map(_KB_SIDO_MAP)
+        df_trade = _select_kb_sido_rows(df_trade)
         df_trade["날짜"] = pd.to_datetime(df_trade["날짜"])
         df_trade["연월"] = df_trade["날짜"].dt.strftime("%Y-%m")
         # 매매거래지수 컬럼명 확인
@@ -1267,8 +1318,7 @@ def fetch_kb_market_data():
         df_jeonse = api.get_market_trend(
             메뉴코드="03", 월간주간구분코드="01", 매물종별구분="01", 기간="5"
         )
-        df_jeonse = df_jeonse[df_jeonse["지역명"].isin(_KB_SIDO_MAP.keys())].copy()
-        df_jeonse["시도"] = df_jeonse["지역명"].map(_KB_SIDO_MAP)
+        df_jeonse = _select_kb_sido_rows(df_jeonse)
         df_jeonse["날짜"] = pd.to_datetime(df_jeonse["날짜"])
         df_jeonse["연월"] = df_jeonse["날짜"].dt.strftime("%Y-%m")
         # 전세수급지수 컬럼 탐색
@@ -1305,6 +1355,9 @@ def fetch_kb_market_data():
     result.to_csv(out_path, index=False, encoding="utf-8-sig")
     print(f"  저장: {out_path}")
     print(f"    행 수: {len(result):,}, 시도 수: {result['시도'].nunique()}")
+    present_sidos = set(result["시도"].dropna().unique())
+    ordered_sidos = [sido for sido in _KB_STANDARD_SIDOS if sido in present_sidos]
+    print(f"    시도: {', '.join(ordered_sidos)}")
     print(f"    기간: {result['연월'].min()} ~ {result['연월'].max()}")
     print(f"    컬럼: {[c for c in result.columns if c.startswith('KB_')]}")
 
@@ -1686,6 +1739,8 @@ def fetch_housing_supply_rate(start_year=2010, end_year=2024):
 # ═══════════════════════════════════════════════════════
 
 def main():
+    global OUTPUT_DIR
+
     parser = argparse.ArgumentParser(
         description="수요 데이터 수집: 소득(국민연금) · 대출(BOK) · 자산(KOSIS) · 근로소득(국세청)"
     )
@@ -1721,13 +1776,48 @@ def main():
     parser.add_argument(
         "--nts-end", type=int, default=2024, help="국세청 종료년도 (기본: 2024)"
     )
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument(
+        "--output-dir",
+        help="출력 디렉토리 (기본: 프로젝트 data/)"
+    )
+    output_group.add_argument(
+        "--onedrive",
+        action="store_true",
+        help="출력을 기존 OneDrive 수요_집계 경로로 명시 선택"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="API 수집은 실행하되 임시 디렉토리만 사용하고 종료 시 삭제"
+    )
     args = parser.parse_args()
 
     run_all = not (args.nps or args.bok or args.kosis or args.nts
                     or args.quintile or args.kb or args.kb_indicators
                     or args.krihs_sentiment or args.housing_supply)
 
-    print(f"\n데이터 출력 디렉토리: {OUTPUT_DIR}\n")
+    if args.onedrive:
+        selected_output_dir = _onedrive_path(ONEDRIVE_OUTPUT_REL)
+    elif args.output_dir:
+        selected_output_dir = os.path.abspath(os.path.expanduser(args.output_dir))
+    else:
+        selected_output_dir = PROJECT_DATA_DIR
+
+    print(f"\n선택된 운영 출력 디렉토리: {selected_output_dir}")
+
+    dry_run_dir = None
+    if args.dry_run:
+        dry_run_dir = tempfile.TemporaryDirectory(
+            prefix="real_estate_demand_dry_run_"
+        )
+        OUTPUT_DIR = dry_run_dir.name
+        print(f"DRY-RUN 임시 출력 디렉토리: {OUTPUT_DIR}")
+        print("DRY-RUN: 운영 출력 파일은 변경하지 않습니다.\n")
+    else:
+        OUTPUT_DIR = selected_output_dir
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        print(f"데이터 출력 디렉토리: {OUTPUT_DIR}\n")
 
     results = {}
 
@@ -1772,6 +1862,11 @@ def main():
         status = f"{len(val):,}행" if val is not None else "실패/없음"
         print(f"  {key}: {status}")
     print("=" * 60)
+
+    if dry_run_dir is not None:
+        dry_run_path = dry_run_dir.name
+        dry_run_dir.cleanup()
+        print(f"DRY-RUN 임시 출력 삭제 완료: {dry_run_path}")
 
 
 if __name__ == "__main__":
