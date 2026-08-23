@@ -115,8 +115,13 @@ st.markdown(
       --re-up:#26A69A; --re-down:#EF5350;
     }
     html, body, [class*="css"]{ font-family:"Noto Sans KR","Pretendard",-apple-system,sans-serif; }
-    /* 상단 툴바(Deploy·메뉴) 숨김, 헤더 투명 */
-    [data-testid="stToolbar"], [data-testid="stAppDeployButton"], .stDeployButton{ display:none !important; }
+    /* 상단 관리 UI는 숨기되 모바일 사이드바 열기 버튼은 보존 */
+    [data-testid="stAppDeployButton"], .stDeployButton,
+    [data-testid="stToolbarActions"], [data-testid="stMainMenu"]{ display:none !important; }
+    [data-testid="stExpandSidebarButton"]{
+      display:flex !important; align-items:center; justify-content:center;
+      min-width:44px; min-height:44px;
+    }
     header[data-testid="stHeader"]{ background:transparent; }
     /* 본문 밀도 */
     [data-testid="stMainBlockContainer"], .block-container{ padding-top:1.4rem; padding-bottom:2.5rem; max-width:1520px; }
@@ -317,8 +322,8 @@ movein_sido_monthly_df = data.get("movein_sido_monthly", pd.DataFrame())
 # --- 사이드바 필터 ---
 st.sidebar.title("필터 설정")
 
-# 캐시 재빌드 버튼
-if st.sidebar.button("Rebuild Cache"):
+# 캐시 재빌드는 로컬 편집 모드에서만 노출
+if not RELEASE_READ_ONLY and st.sidebar.button("Rebuild Cache"):
     with st.sidebar:
         with st.spinner("캐시 재빌드 중..."):
             load_apt_data(force_rebuild=True)
