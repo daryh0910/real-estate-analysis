@@ -81,6 +81,7 @@ MOVEIN_PLAN_PATH = os.path.join(_PROJECT_ROOT, "data", "supply", "movein_plan_co
 # 캐시 경로
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 APT_CACHE_PARQUET = os.path.join(CACHE_DIR, "apt_sigungu_monthly.parquet")
+APT_COMPLEX_CACHE_PARQUET = os.path.join(CACHE_DIR, "apt_complex_monthly.parquet")
 
 # KOSIS 연령대별/성별 인구 (시도, 연간) 경로 — CACHE_DIR 정의 후 배치
 KOSIS_AGE_POP_PATH = os.path.join(CACHE_DIR, "kosis_population_age_sido_yearly.csv")
@@ -227,6 +228,10 @@ def read_csv_auto(path, **kwargs):
     """인코딩 자동 감지 CSV 로더 (utf-8 → cp949 → euc-kr)"""
     for enc in ("utf-8", "cp949", "euc-kr"):
         try:
+            # chunksize 사용 시 pd.read_csv가 실제 반복 전까지 디코딩을 미루므로
+            # 앞부분을 먼저 읽어 잘못된 인코딩의 TextFileReader 반환을 막는다.
+            with open(path, "r", encoding=enc) as handle:
+                handle.read(65_536)
             return pd.read_csv(path, encoding=enc, **kwargs)
         except UnicodeDecodeError:
             continue
@@ -353,6 +358,111 @@ def load_apt_data(chunksize=500_000, keep_sido=True, force_rebuild=False):
     # 캐시 저장
     result.to_parquet(APT_CACHE_PARQUET, index=False)
     return result
+
+
+def load_apt_complex_data(chunksize=500_000, force_rebuild=False):
+    """아파트 실거래를 단지·월 단위로 집계한다.
+
+    배포 환경에서는 사전 생성한 Parquet만 읽고, 로컬에서 캐시를 재빌드할 때만
+    원본 CSV를 청크 처리한다. 해제된 거래와 유효하지 않은 가격·면적은 제외한다.
+
+    Returns:
+        DataFrame [시도, 지역코드, 법정동, 아파트, 연도, 월, 연월,
+                   평균가격, 거래량, 평균단가_per_m2, 평균평당가격]
+    """
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+    if (not force_rebuild) and os.path.exists(APT_COMPLEX_CACHE_PARQUET):
+        return pd.read_parquet(APT_COMPLEX_CACHE_PARQUET)
+
+    if not os.path.exists(APT_PATH):
+        return pd.DataFrame()
+
+    chunks = []
+    reader = read_csv_auto(
+        APT_PATH,
+        chunksize=chunksize,
+        dtype=str,
+        usecols=[
+            "년", "월", "지역코드", "법정동", "아파트", "단지",
+            "전용면적", "거래금액", "해제여부",
+        ],
+        on_bad_lines="skip",
+    )
+
+    for chunk in reader:
+        chunk["지역코드"] = chunk["지역코드"].astype(str).str.strip().str.zfill(5)
+        chunk["법정동"] = chunk["법정동"].fillna("").astype(str).str.strip()
+        chunk["아파트"] = (
+            chunk["아파트"].replace("", np.nan)
+            .fillna(chunk["단지"])
+            .fillna("")
+            .astype(str)
+            .str.strip()
+        )
+        chunk["년_num"] = pd.to_numeric(chunk["년"], errors="coerce")
+        chunk["월_num"] = pd.to_numeric(chunk["월"], errors="coerce")
+        chunk["거래금액_num"] = chunk["거래금액"].apply(_clean_amount)
+        chunk["전용면적_num"] = pd.to_numeric(chunk["전용면적"], errors="coerce")
+
+        cancel_flag = chunk["해제여부"].fillna("").astype(str).str.strip()
+        chunk = chunk[cancel_flag == ""]
+        chunk = chunk.dropna(
+            subset=["년_num", "월_num", "거래금액_num", "전용면적_num"]
+        )
+        chunk = chunk[
+            (chunk["지역코드"] != "00000")
+            & (chunk["법정동"] != "")
+            & (chunk["아파트"] != "")
+            & (chunk["거래금액_num"] > 0)
+            & (chunk["전용면적_num"] > 0)
+            & chunk["월_num"].between(1, 12)
+        ].copy()
+        if chunk.empty:
+            continue
+
+        chunk["시도"] = chunk["지역코드"].str[:2].apply(_sido_from_code).apply(_normalize_sido)
+        chunk["단가_per_m2"] = chunk["거래금액_num"] / chunk["전용면적_num"]
+        group_keys = ["시도", "지역코드", "법정동", "아파트", "년_num", "월_num"]
+        aggregated = (
+            chunk.groupby(group_keys, dropna=False, observed=True)
+            .agg(
+                거래금액합계=("거래금액_num", "sum"),
+                단가합계=("단가_per_m2", "sum"),
+                거래량=("거래금액_num", "count"),
+            )
+            .reset_index()
+        )
+        chunks.append(aggregated)
+
+    result_columns = [
+        "시도", "지역코드", "법정동", "아파트", "연도", "월", "연월",
+        "평균가격", "거래량", "평균단가_per_m2", "평균평당가격",
+    ]
+    if not chunks:
+        return pd.DataFrame(columns=result_columns)
+
+    result = pd.concat(chunks, ignore_index=True)
+    group_keys = ["시도", "지역코드", "법정동", "아파트", "년_num", "월_num"]
+    result = (
+        result.groupby(group_keys, dropna=False, observed=True)[
+            ["거래금액합계", "단가합계", "거래량"]
+        ]
+        .sum()
+        .reset_index()
+    )
+    result["평균가격"] = result["거래금액합계"] / result["거래량"]
+    result["평균단가_per_m2"] = result["단가합계"] / result["거래량"]
+    result["평균평당가격"] = result["평균단가_per_m2"] * 3.305785
+    result["연도"] = result["년_num"].astype(int)
+    result["월"] = result["월_num"].astype(int)
+    result["연월"] = result["연도"].astype(str) + "-" + result["월"].map(lambda value: f"{value:02d}")
+    result["거래량"] = result["거래량"].astype(int)
+    result = result[result_columns].sort_values(
+        ["시도", "지역코드", "법정동", "아파트", "연월"], kind="mergesort"
+    )
+    result.to_parquet(APT_COMPLEX_CACHE_PARQUET, index=False)
+    return result.reset_index(drop=True)
 
 
 def load_apt_data_detail(chunksize=500_000, force_rebuild=False):

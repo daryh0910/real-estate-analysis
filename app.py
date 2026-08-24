@@ -7,18 +7,26 @@ import numpy as np
 import os
 import json
 import math
+import importlib
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
 import numexpr as ne
+import data_loader as _data_loader
+import leader_apartment as _leader_apartment
 
 # 릴리스 모드 — True: 게시판 글쓰기·파일업로드 비활성 (보안·안정성)
 RELEASE_READ_ONLY = True
 
 from buy_decision.schemas import PURPOSES
 from buy_decision.view_model import build_buy_decision_view_model
-from data_loader import load_all_data, load_apt_data, load_rent_data, get_sigungu_name
+from data_loader import (
+    get_sigungu_name,
+    load_all_data,
+    load_apt_data,
+    load_rent_data,
+)
 from board import (
     init_db,
     delete_saved_chart,
@@ -61,6 +69,34 @@ from tax_calculator import (
     calc_acquisition_tax,
     calc_capital_gains_tax,
     calc_investment_return,
+)
+
+# Streamlit Cloud가 app.py를 보조 모듈보다 먼저 핫리로드해도
+# 전체 앱이 ImportError로 중단되지 않도록 실행 시점에 헬퍼를 조회한다.
+try:
+    importlib.invalidate_caches()
+    _leader_apartment = importlib.reload(_leader_apartment)
+except Exception as exc:
+    print(f"[WARN] 대장아파트 보조 모듈 재로드 대기: {exc}")
+
+extract_selected_region_code = getattr(
+    _leader_apartment, "extract_selected_region_code", None
+)
+get_leader_apartment_flow = getattr(
+    _leader_apartment, "get_leader_apartment_flow", None
+)
+get_region_market_flow = getattr(_leader_apartment, "get_region_market_flow", None)
+map_region_code = getattr(_leader_apartment, "map_region_code", None)
+select_leader_apartments = getattr(_leader_apartment, "select_leader_apartments", None)
+LEADER_HELPERS_READY = all(
+    callable(helper)
+    for helper in (
+        extract_selected_region_code,
+        get_leader_apartment_flow,
+        get_region_market_flow,
+        map_region_code,
+        select_leader_apartments,
+    )
 )
 
 st.set_page_config(
@@ -205,6 +241,54 @@ def get_data():
     return load_all_data()
 
 
+@st.cache_data(show_spinner=False, max_entries=3)
+def get_apt_complex_data(
+    sido: str | None = None,
+    start_period: str | None = None,
+    end_period: str | None = None,
+):
+    """대장아파트 메타데이터 또는 선택 기간의 단지 월별 캐시.
+
+    Streamlit Cloud가 app.py만 먼저 핫리로드한 경우 기존 data_loader
+    모듈에 신규 함수가 아직 없을 수 있어 캐시 파일을 직접 읽는다.
+    전체 341만 행을 올리지 않고 Parquet 필터를 적용해 Cloud 메모리를 제한한다.
+    """
+    cache_dir = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "cache",
+    )
+    if sido is None:
+        metadata_path = os.path.join(cache_dir, "apt_sigungu_monthly.parquet")
+        if not os.path.exists(metadata_path):
+            return pd.DataFrame()
+        metadata = pd.read_parquet(metadata_path, columns=["시도", "연월"])
+        return metadata.dropna().drop_duplicates().reset_index(drop=True)
+
+    if start_period is None or end_period is None:
+        raise ValueError("단지 캐시를 읽으려면 시작월과 종료월이 필요합니다.")
+    cache_path = os.path.join(cache_dir, "apt_complex_monthly.parquet")
+    if not os.path.exists(cache_path):
+        return pd.DataFrame()
+    columns = [
+        "시도", "지역코드", "법정동", "아파트", "연월",
+        "평균가격", "거래량", "평균단가_per_m2",
+    ]
+    filters = [
+        ("시도", "==", str(sido)),
+        ("연월", ">=", str(start_period)),
+        ("연월", "<=", str(end_period)),
+    ]
+    return pd.read_parquet(cache_path, columns=columns, filters=filters)
+
+
+def rebuild_apt_complex_data():
+    """로컬 캐시 재빌드. 핫리로드 중 구버전이면 빈 결과를 반환한다."""
+    loader = getattr(_data_loader, "load_apt_complex_data", None)
+    if not callable(loader):
+        return pd.DataFrame()
+    return loader(force_rebuild=True)
+
+
 try:
     data = get_data()
 except Exception as e:
@@ -238,6 +322,7 @@ if st.sidebar.button("Rebuild Cache"):
     with st.sidebar:
         with st.spinner("캐시 재빌드 중..."):
             load_apt_data(force_rebuild=True)
+            rebuild_apt_complex_data()
             load_rent_data("jeonse", force_rebuild=True)
             load_rent_data("wolse", force_rebuild=True)
             load_rent_data("all", force_rebuild=True)
@@ -470,12 +555,12 @@ def _compute_formulas(
 
 # --- 페이지 구성 ---
 # 탭을 두 축으로 분리하고, '선택한 페이지 1개'만 렌더한다(lazy rendering).
-#   🧭 직관 축: 시장을 10초 안에 직관적으로 이해 (Overview·수요공급·거래·매물)
+#   🧭 직관 축: 시장을 10초 안에 직관적으로 이해 (Overview·수요공급·거래·대장아파트·매물)
 #   🔬 검증 축: 구매력을 정량화해 가설을 세우고 실거래가에 대입 (매수판단·적정가·자유차트)
-# st.tabs는 7개 탭 본문을 매 실행마다 전부 계산해 느리므로, segmented_control로 바꿔
+# st.tabs는 8개 탭 본문을 매 실행마다 전부 계산해 느리므로, segmented_control로 바꿔
 # 비활성 페이지의 무거운 차트·연산을 아예 실행하지 않는다.
 _PAGES = [
-    "🧭 Overview", "🧭 수요공급분석", "🧭 거래현황", "🧭 매물현황",
+    "🧭 Overview", "🧭 수요공급분석", "🧭 거래현황", "🧭 대장아파트", "🧭 매물현황",
     "🔬 매수판단", "🔬 적정가·구매력", "🔬 자유차트",
 ]
 st.caption("🧭 직관 = 시장을 빠르게 이해  ·  🔬 검증 = 구매력 정량화·가설 검증")
@@ -553,6 +638,7 @@ _render_kpi_bar()
 overview_tab      = (_active == "🧭 Overview")
 demand_supply_tab = (_active == "🧭 수요공급분석")
 transaction_tab   = (_active == "🧭 거래현황")
+leader_apt_tab    = (_active == "🧭 대장아파트")
 listing_tab       = (_active == "🧭 매물현황")
 buy_decision_tab  = (_active == "🔬 매수판단")
 affordability_tab = (_active == "🔬 적정가·구매력")
@@ -607,6 +693,15 @@ TAB_USAGE_GUIDES = {
             "시계열 비교, 가격비교, 갭분석, 지역순위로 관심 지역을 서로 비교합니다.",
         ],
         "example": "예: 서울 주요 구를 선택하고 거래량이 회복되는 지역을 지역순위에서 찾은 뒤 가격비교 탭에서 추세를 확인합니다.",
+    },
+    "대장아파트": {
+        "purpose": "각 구에서 거래가 충분히 활발하면서 평당가격이 높은 대표 단지를 찾고 가격·거래 흐름을 봅니다.",
+        "steps": [
+            "시도를 고른 뒤 선정과 흐름에 공통으로 적용할 시작·종료월과 최소 거래건수를 선택합니다.",
+            "지도에서 시군구 영역을 클릭하거나 목록에서 관심 지역을 고릅니다.",
+            "선택 지역 전체와 대장단지의 월별 평당가격·거래량 흐름을 함께 비교합니다.",
+        ],
+        "example": "예: 서울·2024-01~2025-12·최소 3건으로 설정한 뒤 지도에서 강남구를 눌러 구 전체와 대장단지의 평당가 흐름을 비교합니다.",
     },
     "매물현황": {
         "purpose": "업로드한 매물 데이터를 기준으로 호가, 매물 수, 단지별 집중도를 확인합니다.",
@@ -2269,8 +2364,350 @@ if main_tab3:
                 st.info("선택한 시도의 인구이동 데이터가 없습니다.")
         else:
             st.info("인구이동 데이터를 업데이트하면 이 탭에서 확인할 수 있습니다.")
-    
-    
+
+
+# ============================
+# Page: 대장아파트
+# ============================
+if leader_apt_tab:
+    st.header("구별 대장아파트")
+    render_tab_usage_guide("대장아파트")
+    if not LEADER_HELPERS_READY:
+        st.info("배포 파일을 동기화하고 있습니다. 잠시 후 새로고침해 주세요.")
+        st.stop()
+    st.caption(
+        "선택한 시작·종료월 사이의 구별 거래량 상위 30% 단지 중 최소 거래건수를 충족하고, "
+        "거래량 가중 평균 평당가격이 가장 높은 단지를 선정합니다."
+    )
+
+    try:
+        with st.spinner("단지별 실거래 캐시를 불러오는 중..."):
+            leader_complex_df = get_apt_complex_data()
+    except Exception as exc:
+        print(f"[ERROR] 대장아파트 캐시 로딩 실패: {exc}")
+        leader_complex_df = pd.DataFrame()
+
+    if leader_complex_df.empty:
+        st.warning(
+            "단지별 실거래 캐시가 없습니다. 로컬에서 build_cache.py를 실행해 "
+            "cache/apt_complex_monthly.parquet를 생성한 뒤 다시 시도하세요."
+        )
+    else:
+        leader_sido_options = sorted(leader_complex_df["시도"].dropna().astype(str).unique())
+        leader_default_sido = next(
+            (sido for sido in selected_sido if sido in leader_sido_options),
+            "서울" if "서울" in leader_sido_options else leader_sido_options[0],
+        )
+        leader_col1, leader_col2, leader_col3 = st.columns([2, 4, 2])
+        with leader_col1:
+            leader_sido = st.selectbox(
+                "시도", leader_sido_options,
+                index=leader_sido_options.index(leader_default_sido),
+                key="leader_sido",
+            )
+
+        leader_period_df = leader_complex_df[leader_complex_df["시도"] == leader_sido]
+        leader_period_options = sorted(
+            pd.to_datetime(
+                leader_period_df["연월"].astype(str), format="%Y-%m", errors="coerce"
+            ).dropna().dt.strftime("%Y-%m").unique().tolist()
+        )
+        if not leader_period_options:
+            st.info("선택한 시도의 연월 데이터가 없습니다.")
+            st.stop()
+
+        leader_default_period = (
+            leader_period_options[-min(24, len(leader_period_options))],
+            leader_period_options[-1],
+        )
+        leader_period_state = st.session_state.get("leader_period_range")
+        if (
+            not isinstance(leader_period_state, (tuple, list))
+            or len(leader_period_state) != 2
+            or any(value not in leader_period_options for value in leader_period_state)
+        ):
+            st.session_state["leader_period_range"] = leader_default_period
+
+        with leader_col2:
+            leader_start_period, leader_end_period = st.select_slider(
+                "선정·조회 기간",
+                options=leader_period_options,
+                key="leader_period_range",
+            )
+        with leader_col3:
+            leader_min_trades = st.number_input(
+                "최소 거래건수", min_value=1, max_value=50, value=3, step=1,
+                key="leader_min_transactions",
+            )
+
+        try:
+            with st.spinner("선택 기간의 단지별 실거래를 불러오는 중..."):
+                leader_sido_df = get_apt_complex_data(
+                    leader_sido,
+                    leader_start_period,
+                    leader_end_period,
+                )
+        except Exception as exc:
+            print(f"[ERROR] 대장아파트 캐시 로딩 실패: {exc}")
+            leader_sido_df = pd.DataFrame()
+        if leader_sido_df.empty:
+            st.warning("선택한 시도·기간의 단지별 실거래 캐시가 없습니다.")
+            st.stop()
+
+        leader_rank = select_leader_apartments(
+            leader_sido_df,
+            min_transactions=int(leader_min_trades),
+            volume_quantile=0.70,
+            start_period=leader_start_period,
+            end_period=leader_end_period,
+        )
+
+        if leader_rank.empty:
+            st.info("선택한 조건을 충족하는 대장아파트 후보가 없습니다. 최소 거래건수를 낮춰보세요.")
+        else:
+            leader_rank = leader_rank.copy()
+            leader_rank["시군구명"] = leader_rank["지역코드"].apply(get_sigungu_name)
+            leader_rank["단지표시"] = leader_rank["법정동"] + " · " + leader_rank["아파트"]
+
+            st.subheader(f"{leader_sido} 구별 대장아파트")
+            leader_table = leader_rank[
+                [
+                    "시군구명", "단지표시", "거래량", "평균평당가격", "평균가격",
+                    "후보단지수", "전체단지수", "관찰시작", "관찰종료", "데이터상태",
+                ]
+            ].rename(
+                columns={
+                    "시군구명": "시군구",
+                    "단지표시": "대장아파트",
+                    "거래량": "관찰기간 거래량",
+                    "평균평당가격": "평균 평당가격(만원)",
+                    "평균가격": "평균 거래가격(만원)",
+                    "후보단지수": "후보 단지",
+                    "전체단지수": "전체 단지",
+                    "관찰시작": "관찰 시작",
+                    "관찰종료": "관찰 종료",
+                    "데이터상태": "데이터 상태",
+                }
+            )
+            st.dataframe(
+                leader_table.style.format(
+                    {
+                        "관찰기간 거래량": "{:,.0f}",
+                        "평균 평당가격(만원)": "{:,.0f}",
+                        "평균 거래가격(만원)": "{:,.0f}",
+                        "후보 단지": "{:,.0f}",
+                        "전체 단지": "{:,.0f}",
+                    },
+                    na_rep="N/A",
+                ),
+                use_container_width=True,
+                hide_index=True,
+                height=min(520, 76 + len(leader_table) * 35),
+            )
+            delayed_regions = leader_rank[leader_rank["데이터경과개월"] > 0]
+            if not delayed_regions.empty:
+                delayed_labels = ", ".join(
+                    f"{row['시군구명']}({row['데이터상태']})"
+                    for _, row in delayed_regions.iterrows()
+                )
+                st.warning(f"전국 최신월보다 원천 데이터가 늦은 지역: {delayed_labels}")
+
+            leader_codes = leader_rank["지역코드"].astype(str).tolist()
+            leader_default_code = next(
+                (str(code) for code in selected_codes if str(code) in leader_codes),
+                leader_codes[0],
+            )
+            if str(st.session_state.get("leader_region_code", "")) not in leader_codes:
+                st.session_state["leader_region_code"] = leader_default_code
+
+            # 지도는 단지 좌표가 아닌 시군구 경계를 표시한다.
+            leader_rank["지도지역코드"] = leader_rank["지역코드"].apply(map_region_code)
+            leader_mapped = leader_rank.dropna(subset=["지도지역코드"]).copy()
+            leader_mapped["지도지역코드"] = leader_mapped["지도지역코드"].astype(str).str.zfill(5)
+            leader_unmapped = leader_rank[leader_rank["지도지역코드"].isna()]
+            if not leader_unmapped.empty:
+                unmapped_labels = ", ".join(leader_unmapped["시군구명"].astype(str).tolist())
+                st.warning(
+                    f"현재 경계 데이터와 매칭되지 않아 지도에서 제외된 지역 "
+                    f"{len(leader_unmapped)}개: {unmapped_labels}"
+                )
+
+            geo_path = os.path.join(os.path.dirname(__file__), "geo_data", "sigungu.geojson")
+            if not leader_mapped.empty and os.path.exists(geo_path):
+                with open(geo_path, encoding="utf-8") as geo_file:
+                    leader_geojson = json.load(geo_file)
+
+                leader_map_views = {
+                    "서울": ({"lat": 37.5665, "lon": 126.9780}, 9.0),
+                    "부산": ({"lat": 35.1796, "lon": 129.0756}, 8.2),
+                    "대구": ({"lat": 35.8714, "lon": 128.6014}, 8.2),
+                    "인천": ({"lat": 37.4563, "lon": 126.7052}, 8.0),
+                    "광주": ({"lat": 35.1595, "lon": 126.8526}, 8.5),
+                    "대전": ({"lat": 36.3504, "lon": 127.3845}, 8.5),
+                    "울산": ({"lat": 35.5384, "lon": 129.3114}, 8.0),
+                    "세종": ({"lat": 36.4800, "lon": 127.2890}, 9.0),
+                    "경기": ({"lat": 37.4000, "lon": 127.0000}, 7.0),
+                    "강원": ({"lat": 37.8000, "lon": 128.2000}, 6.5),
+                    "충북": ({"lat": 36.8000, "lon": 127.7000}, 7.0),
+                    "충남": ({"lat": 36.6000, "lon": 126.8000}, 7.0),
+                    "전북": ({"lat": 35.7000, "lon": 127.1000}, 7.0),
+                    "전남": ({"lat": 34.8000, "lon": 126.9000}, 6.8),
+                    "경북": ({"lat": 36.4000, "lon": 128.8000}, 6.6),
+                    "경남": ({"lat": 35.3000, "lon": 128.3000}, 7.0),
+                    "제주": ({"lat": 33.3800, "lon": 126.5500}, 8.0),
+                }
+                leader_map_center, leader_map_zoom = leader_map_views.get(
+                    leader_sido, ({"lat": 36.5, "lon": 127.8}, 6.0)
+                )
+                leader_map = px.choropleth_map(
+                    leader_mapped,
+                    geojson=leader_geojson,
+                    locations="지도지역코드",
+                    featureidkey="properties.SIG_CD",
+                    color="평균평당가격",
+                    color_continuous_scale="YlOrRd",
+                    hover_name="시군구명",
+                    hover_data={
+                        "단지표시": True,
+                        "거래량": ":,.0f",
+                        "데이터상태": True,
+                        "지도지역코드": False,
+                    },
+                    custom_data=["지역코드"],
+                    map_style="carto-darkmatter",
+                    center=leader_map_center,
+                    zoom=leader_map_zoom,
+                    labels={
+                        "평균평당가격": "평균 평당가격(만원)",
+                        "단지표시": "대장아파트",
+                        "거래량": "관찰기간 거래량",
+                        "데이터상태": "데이터 상태",
+                    },
+                    title=f"{leader_sido} 시군구별 대장아파트 평당가",
+                )
+                leader_selected_code = str(st.session_state["leader_region_code"])
+                leader_selected_points = [
+                    index
+                    for index, code in enumerate(leader_mapped["지역코드"].astype(str))
+                    if code == leader_selected_code
+                ]
+                leader_map.update_traces(
+                    selectedpoints=leader_selected_points,
+                    selected=dict(marker=dict(opacity=1.0)),
+                    unselected=dict(marker=dict(opacity=0.55)),
+                )
+                leader_map.update_layout(height=520, margin=dict(t=50, b=10, l=10, r=10))
+
+                def _sync_leader_map_selection():
+                    selected_code = extract_selected_region_code(
+                        st.session_state.get("leader_apartment_map")
+                    )
+                    if selected_code is not None and str(selected_code) in leader_codes:
+                        st.session_state["leader_region_code"] = str(selected_code)
+
+                register_fig("대장아파트_지도", leader_map, "대장아파트")
+                st.plotly_chart(
+                    leader_map,
+                    key="leader_apartment_map",
+                    on_select=_sync_leader_map_selection,
+                    selection_mode="points",
+                    width="stretch",
+                )
+                st.caption("지도는 대장아파트의 실제 좌표가 아닌 시군구 행정구역을 표시합니다. 영역을 클릭하면 아래 흐름이 연동됩니다.")
+            elif not os.path.exists(geo_path):
+                st.info("geo_data/sigungu.geojson 파일이 없어 지도를 표시할 수 없습니다.")
+
+            selected_leader_code = st.selectbox(
+                "지도 또는 목록에서 흐름을 볼 시군구",
+                leader_codes,
+                format_func=lambda code: get_sigungu_name(code),
+                key="leader_region_code",
+            )
+            selected_leader = leader_rank[
+                leader_rank["지역코드"].astype(str) == str(selected_leader_code)
+            ].iloc[0]
+            leader_flow = get_leader_apartment_flow(
+                leader_sido_df,
+                selected_leader_code,
+                selected_leader["법정동"],
+                selected_leader["아파트"],
+                start_period=leader_start_period,
+                end_period=leader_end_period,
+            )
+            leader_region_flow = get_region_market_flow(
+                leader_sido_df,
+                selected_leader_code,
+                start_period=leader_start_period,
+                end_period=leader_end_period,
+            )
+
+            metric1, metric2, metric3, metric4 = st.columns(4)
+            metric1.metric("대장아파트", selected_leader["아파트"])
+            metric2.metric("법정동", selected_leader["법정동"])
+            metric3.metric("선택기간 평균 평당가격", f"{selected_leader['평균평당가격']:,.0f}만원")
+            metric4.metric("관찰기간 거래량", f"{int(selected_leader['거래량']):,}건")
+
+            if leader_flow.empty and leader_region_flow.empty:
+                st.info("선택한 기간에 해당 지역과 단지의 거래가 없습니다.")
+            else:
+                leader_fig = make_subplots(specs=[[{"secondary_y": True}]])
+                if not leader_region_flow.empty:
+                    leader_fig.add_trace(
+                        go.Bar(
+                            x=leader_region_flow["연월"], y=leader_region_flow["거래량"],
+                            name="지역 전체 거래량", marker_color="#2962FF", opacity=0.22,
+                        ),
+                        secondary_y=True,
+                    )
+                    leader_fig.add_trace(
+                        go.Scatter(
+                            x=leader_region_flow["연월"], y=leader_region_flow["평균평당가격"],
+                            name="지역 전체 평당가", mode="lines+markers",
+                            line=dict(color="#8B949E", width=2, dash="dash"),
+                        ),
+                        secondary_y=False,
+                    )
+                if not leader_flow.empty:
+                    leader_fig.add_trace(
+                        go.Bar(
+                            x=leader_flow["연월"], y=leader_flow["거래량"],
+                            name="대장단지 거래량", marker_color="#26A69A", opacity=0.42,
+                        ),
+                        secondary_y=True,
+                    )
+                    leader_fig.add_trace(
+                        go.Scatter(
+                            x=leader_flow["연월"], y=leader_flow["평균평당가격"],
+                            name="대장단지 평당가", mode="lines+markers",
+                            line=dict(color="#F5B301", width=3),
+                        ),
+                        secondary_y=False,
+                    )
+                leader_fig.update_layout(
+                    title=(
+                        f"{get_sigungu_name(selected_leader_code)} "
+                        f"전체 vs {selected_leader['법정동']} {selected_leader['아파트']}"
+                    ),
+                    xaxis_title="거래월",
+                    hovermode="x unified",
+                    legend=dict(orientation="h", y=1.08, x=0),
+                    barmode="group",
+                )
+                leader_fig.update_yaxes(title_text="평균 평당가격(만원/평)", secondary_y=False)
+                leader_fig.update_yaxes(title_text="거래량(건)", secondary_y=True, rangemode="tozero")
+                register_fig("대장아파트_지역단지흐름", leader_fig, "대장아파트")
+                st.plotly_chart(leader_fig, width="stretch")
+
+            with st.expander("선정 기준과 주의사항"):
+                st.write(
+                    f"관찰기간은 {selected_leader['관찰시작']}~{selected_leader['관찰종료']}이며, "
+                    f"구별 거래량 상위 30%이면서 {int(leader_min_trades)}건 이상인 "
+                    "단지를 후보로 삼았습니다."
+                )
+                st.write("평당가격은 거래금액 ÷ 전용면적(m²) × 3.305785의 거래량 가중 평균입니다.")
+                st.write("실거래 신고 해제 건은 제외했습니다. 대장아파트 선정 결과는 관찰기간과 최소 거래건수에 따라 달라집니다.")
+
+
     # ============================
     # Tab 4: 수요-공급 분석기 (구 수식 계산기)
     # ============================

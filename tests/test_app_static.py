@@ -5,6 +5,16 @@ from pathlib import Path
 APP_PATH = Path(__file__).resolve().parents[1] / "app.py"
 
 
+def _leader_apartment_block() -> str:
+    source = APP_PATH.read_text(encoding="utf-8")
+    start = source.find("# Page: 대장아파트")
+    assert start != -1, "대장아파트 페이지 블록 주석이 필요합니다"
+    body_start = source.find("if leader_apt_tab:", start)
+    assert body_start != -1, "대장아파트 페이지 본문이 필요합니다"
+    next_marker = source.find("# ============================", body_start)
+    return source[start:] if next_marker == -1 else source[start:next_marker]
+
+
 def _indicator_catalog_columns():
     tree = ast.parse(APP_PATH.read_text(encoding="utf-8"))
     for node in tree.body:
@@ -53,9 +63,138 @@ def test_listing_price_parser_replaces_old_first_number_extraction():
 def test_top_level_tab_usage_guides_are_visible_to_users():
     source = APP_PATH.read_text(encoding="utf-8")
 
-    for tab_name in ["Overview", "매수판단", "수요공급분석", "거래현황", "매물현황", "자유차트"]:
+    for tab_name in ["Overview", "매수판단", "수요공급분석", "거래현황", "대장아파트", "매물현황", "자유차트"]:
         assert f'"{tab_name}"' in source
         assert f'render_tab_usage_guide("{tab_name}")' in source
 
     assert "처음 보는 분을 위한 사용법" in source
     assert "**예시**" in source
+
+
+def test_leader_apartment_page_contract_is_present():
+    source = APP_PATH.read_text(encoding="utf-8")
+
+    for text in [
+        '"🧭 대장아파트"',
+        'leader_apt_tab',
+        'get_apt_complex_data()',
+        'select_leader_apartments(',
+        'get_leader_apartment_flow(',
+        'get_region_market_flow(',
+        '"대장아파트_지역단지흐름"',
+        '"평균평당가격"',
+        '"거래량"',
+        '"선정 기준과 주의사항"',
+    ]:
+        assert text in source
+
+
+def test_leader_apartment_loader_is_hot_reload_and_cloud_memory_safe():
+    source = APP_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    imported_from_data_loader = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "data_loader"
+        for alias in node.names
+    }
+    assert "load_apt_complex_data" not in imported_from_data_loader
+    assert '@st.cache_data(show_spinner=False, max_entries=3)' in source
+    assert '"apt_sigungu_monthly.parquet"' in source
+    assert '"apt_complex_monthly.parquet"' in source
+    assert '("시도", "==", str(sido))' in source
+    assert '("연월", ">=", str(start_period))' in source
+    assert '("연월", "<=", str(end_period))' in source
+    assert 'pd.read_parquet(cache_path, columns=columns, filters=filters)' in source
+    assert 'leader_sido_df = get_apt_complex_data(' in source
+    assert 'get_leader_apartment_flow(\n                leader_sido_df,' in source
+    assert 'get_region_market_flow(\n                leader_sido_df,' in source
+
+
+def test_leader_apartment_helpers_are_streamlit_hot_reload_safe():
+    source = APP_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    imported_from_leader = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "leader_apartment"
+        for alias in node.names
+    }
+    assert not imported_from_leader
+    assert "import leader_apartment as _leader_apartment" in source
+    assert "importlib.reload(_leader_apartment)" in source
+    lazy_helper_names = {
+        node.args[1].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) >= 3
+        and isinstance(node.args[0], ast.Name)
+        and node.args[0].id == "_leader_apartment"
+        and isinstance(node.args[1], ast.Constant)
+    }
+    for helper in {
+        "extract_selected_region_code",
+        "get_leader_apartment_flow",
+        "get_region_market_flow",
+        "map_region_code",
+        "select_leader_apartments",
+    }:
+        assert helper in lazy_helper_names
+    assert "if not LEADER_HELPERS_READY:" in source
+
+
+def test_leader_apartment_uses_one_month_range_for_selection_and_both_flows():
+    block = _leader_apartment_block()
+
+    assert 'leader_start_period, leader_end_period = st.select_slider(' in block
+    assert 'leader_period_options[-min(24, len(leader_period_options))]' in block
+    assert 'key="leader_period_range"' in block
+    assert block.count('start_period=leader_start_period') == 3
+    assert block.count('end_period=leader_end_period') == 3
+    assert 'select_leader_apartments(' in block
+    assert 'get_leader_apartment_flow(' in block
+    assert 'get_region_market_flow(' in block
+
+
+def test_leader_apartment_map_is_selectable_and_keeps_original_region_code():
+    block = _leader_apartment_block()
+
+    for text in [
+        '"geo_data", "sigungu.geojson"',
+        'px.choropleth_map(',
+        'featureidkey="properties.SIG_CD"',
+        'color="평균평당가격"',
+        'custom_data=["지역코드"]',
+        'leader_rank["지도지역코드"] = leader_rank["지역코드"].apply(map_region_code)',
+        'key="leader_apartment_map"',
+        'on_select=_sync_leader_map_selection',
+        'selection_mode="points"',
+        'extract_selected_region_code(',
+        'st.session_state["leader_region_code"] = str(selected_code)',
+        '지도에서 제외된 지역',
+        '실제 좌표가 아닌 시군구 행정구역',
+    ]:
+        assert text in block
+
+    assert 'leader_map_views = {' in block
+    assert 'width="stretch"' in block
+
+
+def test_leader_apartment_flow_compares_region_and_complex_on_two_axes():
+    block = _leader_apartment_block()
+
+    for trace_name in [
+        'name="지역 전체 거래량"',
+        'name="대장단지 거래량"',
+        'name="지역 전체 평당가"',
+        'name="대장단지 평당가"',
+    ]:
+        assert trace_name in block
+
+    assert 'make_subplots(specs=[[{"secondary_y": True}]])' in block
+    assert 'register_fig("대장아파트_지역단지흐름"' in block
+    assert 'st.plotly_chart(leader_fig, width="stretch")' in block

@@ -101,10 +101,12 @@ def _api_get(url, params=None, retries=3, delay=1.0):
             return resp
         except requests.RequestException as e:
             if attempt < retries - 1:
-                print(f"  재시도 ({attempt+1}/{retries}): {e}")
+                print(f"  재시도 ({attempt+1}/{retries}): {type(e).__name__}")
                 time.sleep(delay * (attempt + 1))
             else:
-                raise
+                raise RuntimeError(
+                    f"공공데이터 API 요청 실패: {type(e).__name__}"
+                ) from None
 
 
 # ═══════════════════════════════════════════════════════
