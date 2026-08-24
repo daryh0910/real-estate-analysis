@@ -8,7 +8,8 @@ SGIS 통계지리정보서비스 데이터 수집 스크립트
 
 사용법:
     python download_sgis_data.py             # 전체 실행
-    python download_sgis_data.py --test      # 서울만 테스트
+    python download_sgis_data.py --test      # 서울만 임시 경로에 테스트
+    python download_sgis_data.py --test --output-dir /tmp/sgis_test
 
 출력 파일 (cache/ 디렉토리):
     sgis_population_sigungu_yearly.csv
@@ -24,6 +25,8 @@ import os
 import sys
 import time
 import argparse
+import tempfile
+from pathlib import Path
 import requests
 import pandas as pd
 from dotenv import load_dotenv
@@ -35,8 +38,9 @@ load_dotenv()
 # ═══════════════════════════════════════════════════════
 
 BASE_URL = "https://sgisapi.mods.go.kr/OpenAPI3"
-CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
-os.makedirs(CACHE_DIR, exist_ok=True)
+PROJECT_ROOT = Path(__file__).resolve().parent
+CACHE_DIR = PROJECT_ROOT / "cache"
+TEST_OUTPUT_DIR = Path(tempfile.gettempdir()) / "real_estate_analysis_sgis_test"
 
 CONSUMER_KEY    = os.getenv("SGIS_CONSUMER_KEY", "")
 CONSUMER_SECRET = os.getenv("SGIS_CONSUMER_SECRET", "")
@@ -245,8 +249,9 @@ def _to_float(v) -> float | None:
         return None
 
 
-def save(df: pd.DataFrame, filename: str):
-    path = os.path.join(CACHE_DIR, filename)
+def save(df: pd.DataFrame, filename: str, output_dir: Path):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / filename
     df.to_csv(path, index=False, encoding="utf-8-sig")
     print(f"  ✅ 저장: {path}  ({len(df)}행)")
 
@@ -261,7 +266,16 @@ def main():
     parser.add_argument("--household",  action="store_true", help="가구 통계만")
     parser.add_argument("--house",      action="store_true", help="주택 통계만")
     parser.add_argument("--test",       action="store_true", help="서울만 테스트 (2022-2023)")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="출력 디렉터리 (--test 기본: 시스템 임시 경로, 일반 기본: cache/)",
+    )
     args = parser.parse_args()
+
+    output_dir = (args.output_dir or (TEST_OUTPUT_DIR if args.test else CACHE_DIR)).expanduser().resolve()
+    if args.test and output_dir == CACHE_DIR.resolve():
+        parser.error("--test 출력은 운영 cache/ 디렉터리와 분리해야 합니다.")
 
     test_sido  = ["11"] if args.test else None
     test_years = [2022, 2023] if args.test else None
@@ -276,21 +290,21 @@ def main():
         print("\n[1/3] 인구 통계 수집 중...")
         df = collect_population(test_sido, test_years)
         if not df.empty:
-            save(df, "sgis_population_sido_yearly.csv")
+            save(df, "sgis_population_sido_yearly.csv", output_dir)
             print(df.head(3).to_string())
 
     if run_all or args.household:
         print("\n[2/3] 가구 통계 수집 중...")
         df = collect_household(test_sido, test_years)
         if not df.empty:
-            save(df, "sgis_household_sido_yearly.csv")
+            save(df, "sgis_household_sido_yearly.csv", output_dir)
             print(df.head(3).to_string())
 
     if run_all or args.house:
         print("\n[3/3] 주택 통계 수집 중...")
         df = collect_house(test_sido, test_years)
         if not df.empty:
-            save(df, "sgis_house_sido_yearly.csv")
+            save(df, "sgis_house_sido_yearly.csv", output_dir)
             print(df.head(3).to_string())
 
     print("\n완료!")

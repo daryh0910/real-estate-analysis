@@ -42,3 +42,6 @@ plans/
 # 로컬 SQLite (커뮤니티 게시판)
 board.db
 board_images/
+codex/260823_데이터최신화_codex/backup/
+codex/260823_데이터최신화_codex/staging/
+codex/260823_데이터최신화_codex/__pycache__/

@@ -1,0 +1,1048 @@
+diff --git a/app.py b/app.py
+index 21f6fa7..7a9d7b5 100644
+--- a/app.py
++++ b/app.py
+@@ -18,7 +18,14 @@ RELEASE_READ_ONLY = True
+ 
+ from buy_decision.schemas import PURPOSES
+ from buy_decision.view_model import build_buy_decision_view_model
+-from data_loader import load_all_data, load_apt_data, load_rent_data, get_sigungu_name
++from data_loader import (
++    get_sigungu_name,
++    load_all_data,
++    load_apt_complex_data,
++    load_apt_data,
++    load_rent_data,
++)
++from leader_apartment import get_leader_apartment_flow, select_leader_apartments
+ from board import (
+     init_db,
+     delete_saved_chart,
+@@ -205,6 +212,12 @@ def get_data():
+     return load_all_data()
+ 
+ 
++@st.cache_data(show_spinner=False)
++def get_apt_complex_data():
++    """대장아파트 페이지에서만 지연 로딩하는 단지 월별 캐시."""
++    return load_apt_complex_data()
++
++
+ try:
+     data = get_data()
+ except Exception as e:
+@@ -238,6 +251,7 @@ if st.sidebar.button("Rebuild Cache"):
+     with st.sidebar:
+         with st.spinner("캐시 재빌드 중..."):
+             load_apt_data(force_rebuild=True)
++            load_apt_complex_data(force_rebuild=True)
+             load_rent_data("jeonse", force_rebuild=True)
+             load_rent_data("wolse", force_rebuild=True)
+             load_rent_data("all", force_rebuild=True)
+@@ -470,12 +484,12 @@ def _compute_formulas(
+ 
+ # --- 페이지 구성 ---
+ # 탭을 두 축으로 분리하고, '선택한 페이지 1개'만 렌더한다(lazy rendering).
+-#   🧭 직관 축: 시장을 10초 안에 직관적으로 이해 (Overview·수요공급·거래·매물)
++#   🧭 직관 축: 시장을 10초 안에 직관적으로 이해 (Overview·수요공급·거래·대장아파트·매물)
+ #   🔬 검증 축: 구매력을 정량화해 가설을 세우고 실거래가에 대입 (매수판단·적정가·자유차트)
+-# st.tabs는 7개 탭 본문을 매 실행마다 전부 계산해 느리므로, segmented_control로 바꿔
++# st.tabs는 8개 탭 본문을 매 실행마다 전부 계산해 느리므로, segmented_control로 바꿔
+ # 비활성 페이지의 무거운 차트·연산을 아예 실행하지 않는다.
+ _PAGES = [
+-    "🧭 Overview", "🧭 수요공급분석", "🧭 거래현황", "🧭 매물현황",
++    "🧭 Overview", "🧭 수요공급분석", "🧭 거래현황", "🧭 대장아파트", "🧭 매물현황",
+     "🔬 매수판단", "🔬 적정가·구매력", "🔬 자유차트",
+ ]
+ st.caption("🧭 직관 = 시장을 빠르게 이해  ·  🔬 검증 = 구매력 정량화·가설 검증")
+@@ -553,6 +567,7 @@ _render_kpi_bar()
+ overview_tab      = (_active == "🧭 Overview")
+ demand_supply_tab = (_active == "🧭 수요공급분석")
+ transaction_tab   = (_active == "🧭 거래현황")
++leader_apt_tab    = (_active == "🧭 대장아파트")
+ listing_tab       = (_active == "🧭 매물현황")
+ buy_decision_tab  = (_active == "🔬 매수판단")
+ affordability_tab = (_active == "🔬 적정가·구매력")
+@@ -608,6 +623,15 @@ TAB_USAGE_GUIDES = {
+         ],
+         "example": "예: 서울 주요 구를 선택하고 거래량이 회복되는 지역을 지역순위에서 찾은 뒤 가격비교 탭에서 추세를 확인합니다.",
+     },
++    "대장아파트": {
++        "purpose": "각 구에서 거래가 충분히 활발하면서 평당가격이 높은 대표 단지를 찾고 가격·거래 흐름을 봅니다.",
++        "steps": [
++            "시도와 최근 관찰기간, 최소 거래건수를 선택합니다.",
++            "구별 대장아파트 표에서 대표 단지와 선정 근거를 비교합니다.",
++            "관심 구를 고르고 월별 평당가격과 거래량 흐름을 함께 확인합니다.",
++        ],
++        "example": "예: 서울·최근 24개월·최소 3건으로 설정한 뒤 강남구 대장단지의 평당가격과 거래량이 같이 움직이는지 확인합니다.",
++    },
+     "매물현황": {
+         "purpose": "업로드한 매물 데이터를 기준으로 호가, 매물 수, 단지별 집중도를 확인합니다.",
+         "steps": [
+@@ -2269,8 +2293,187 @@ if main_tab3:
+                 st.info("선택한 시도의 인구이동 데이터가 없습니다.")
+         else:
+             st.info("인구이동 데이터를 업데이트하면 이 탭에서 확인할 수 있습니다.")
+-    
+-    
++
++
++# ============================
++# Page: 대장아파트
++# ============================
++if leader_apt_tab:
++    st.header("구별 대장아파트")
++    render_tab_usage_guide("대장아파트")
++    st.caption(
++        "지역별 최신월부터 계산한 관찰기간의 구별 거래량 상위 30% 단지 중 최소 거래건수를 충족하고, "
++        "거래량 가중 평균 평당가격이 가장 높은 단지를 선정합니다."
++    )
++
++    try:
++        with st.spinner("단지별 실거래 캐시를 불러오는 중..."):
++            leader_complex_df = get_apt_complex_data()
++    except Exception as exc:
++        print(f"[ERROR] 대장아파트 캐시 로딩 실패: {exc}")
++        leader_complex_df = pd.DataFrame()
++
++    if leader_complex_df.empty:
++        st.warning(
++            "단지별 실거래 캐시가 없습니다. 로컬에서 build_cache.py를 실행해 "
++            "cache/apt_complex_monthly.parquet를 생성한 뒤 다시 시도하세요."
++        )
++    else:
++        leader_sido_options = sorted(leader_complex_df["시도"].dropna().astype(str).unique())
++        leader_default_sido = next(
++            (sido for sido in selected_sido if sido in leader_sido_options),
++            "서울" if "서울" in leader_sido_options else leader_sido_options[0],
++        )
++        leader_col1, leader_col2, leader_col3 = st.columns([2, 2, 2])
++        with leader_col1:
++            leader_sido = st.selectbox(
++                "시도", leader_sido_options,
++                index=leader_sido_options.index(leader_default_sido),
++                key="leader_sido",
++            )
++        with leader_col2:
++            leader_lookback = st.select_slider(
++                "선정 관찰기간", options=[12, 24, 36, 60], value=24,
++                format_func=lambda value: f"최근 {value}개월",
++                key="leader_lookback_months",
++            )
++        with leader_col3:
++            leader_min_trades = st.number_input(
++                "최소 거래건수", min_value=1, max_value=50, value=3, step=1,
++                key="leader_min_transactions",
++            )
++
++        leader_sido_df = leader_complex_df[leader_complex_df["시도"] == leader_sido]
++        leader_rank = select_leader_apartments(
++            leader_sido_df,
++            lookback_months=int(leader_lookback),
++            min_transactions=int(leader_min_trades),
++            volume_quantile=0.70,
++        )
++
++        if leader_rank.empty:
++            st.info("선택한 조건을 충족하는 대장아파트 후보가 없습니다. 최소 거래건수를 낮춰보세요.")
++        else:
++            leader_rank = leader_rank.copy()
++            leader_rank["시군구명"] = leader_rank["지역코드"].apply(get_sigungu_name)
++            leader_rank["단지표시"] = leader_rank["법정동"] + " · " + leader_rank["아파트"]
++
++            st.subheader(f"{leader_sido} 구별 대장아파트")
++            leader_table = leader_rank[
++                [
++                    "시군구명", "단지표시", "거래량", "평균평당가격", "평균가격",
++                    "후보단지수", "전체단지수", "관찰시작", "관찰종료", "데이터상태",
++                ]
++            ].rename(
++                columns={
++                    "시군구명": "시군구",
++                    "단지표시": "대장아파트",
++                    "거래량": "관찰기간 거래량",
++                    "평균평당가격": "평균 평당가격(만원)",
++                    "평균가격": "평균 거래가격(만원)",
++                    "후보단지수": "후보 단지",
++                    "전체단지수": "전체 단지",
++                    "관찰시작": "관찰 시작",
++                    "관찰종료": "관찰 종료",
++                    "데이터상태": "데이터 상태",
++                }
++            )
++            st.dataframe(
++                leader_table.style.format(
++                    {
++                        "관찰기간 거래량": "{:,.0f}",
++                        "평균 평당가격(만원)": "{:,.0f}",
++                        "평균 거래가격(만원)": "{:,.0f}",
++                        "후보 단지": "{:,.0f}",
++                        "전체 단지": "{:,.0f}",
++                    },
++                    na_rep="N/A",
++                ),
++                use_container_width=True,
++                hide_index=True,
++                height=min(520, 76 + len(leader_table) * 35),
++            )
++            delayed_regions = leader_rank[leader_rank["데이터경과개월"] > 0]
++            if not delayed_regions.empty:
++                delayed_labels = ", ".join(
++                    f"{row['시군구명']}({row['데이터상태']})"
++                    for _, row in delayed_regions.iterrows()
++                )
++                st.warning(f"전국 최신월보다 원천 데이터가 늦은 지역: {delayed_labels}")
++
++            leader_codes = leader_rank["지역코드"].astype(str).tolist()
++            leader_default_code = next(
++                (str(code) for code in selected_codes if str(code) in leader_codes),
++                leader_codes[0],
++            )
++            selected_leader_code = st.selectbox(
++                "흐름을 볼 시군구",
++                leader_codes,
++                index=leader_codes.index(leader_default_code),
++                format_func=lambda code: get_sigungu_name(code),
++                key="leader_region_code",
++            )
++            selected_leader = leader_rank[
++                leader_rank["지역코드"].astype(str) == str(selected_leader_code)
++            ].iloc[0]
++            leader_flow = get_leader_apartment_flow(
++                leader_complex_df,
++                selected_leader_code,
++                selected_leader["법정동"],
++                selected_leader["아파트"],
++                start_year=selected_years[0],
++                end_year=selected_years[1],
++            )
++
++            metric1, metric2, metric3, metric4 = st.columns(4)
++            metric1.metric("대장아파트", selected_leader["아파트"])
++            metric2.metric("법정동", selected_leader["법정동"])
++            metric3.metric("최근 평균 평당가격", f"{selected_leader['평균평당가격']:,.0f}만원")
++            metric4.metric("관찰기간 거래량", f"{int(selected_leader['거래량']):,}건")
++
++            if leader_flow.empty:
++                st.info("왼쪽 기간 필터에 해당 단지의 거래가 없습니다.")
++            else:
++                leader_fig = make_subplots(specs=[[{"secondary_y": True}]])
++                leader_fig.add_trace(
++                    go.Bar(
++                        x=leader_flow["연월"], y=leader_flow["거래량"],
++                        name="거래량", marker_color="#2962FF", opacity=0.30,
++                    ),
++                    secondary_y=True,
++                )
++                leader_fig.add_trace(
++                    go.Scatter(
++                        x=leader_flow["연월"], y=leader_flow["평균평당가격"],
++                        name="평균 평당가격", mode="lines+markers",
++                        line=dict(color="#F5B301", width=3),
++                    ),
++                    secondary_y=False,
++                )
++                leader_fig.update_layout(
++                    title=(
++                        f"{get_sigungu_name(selected_leader_code)} "
++                        f"{selected_leader['법정동']} {selected_leader['아파트']} 흐름"
++                    ),
++                    xaxis_title="거래월",
++                    hovermode="x unified",
++                    legend=dict(orientation="h", y=1.08, x=0),
++                )
++                leader_fig.update_yaxes(title_text="평균 평당가격(만원/평)", secondary_y=False)
++                leader_fig.update_yaxes(title_text="거래량(건)", secondary_y=True, rangemode="tozero")
++                register_fig("대장아파트_가격거래량", leader_fig, "대장아파트")
++                st.plotly_chart(leader_fig, use_container_width=True)
++
++            with st.expander("선정 기준과 주의사항"):
++                st.write(
++                    f"관찰기간은 {selected_leader['관찰시작']}~{selected_leader['관찰종료']}이며, "
++                    f"구별 거래량 상위 30%이면서 {int(leader_min_trades)}건 이상인 "
++                    "단지를 후보로 삼았습니다."
++                )
++                st.write("평당가격은 거래금액 ÷ 전용면적(m²) × 3.305785의 거래량 가중 평균입니다.")
++                st.write("실거래 신고 해제 건은 제외했습니다. 대장아파트 선정 결과는 관찰기간과 최소 거래건수에 따라 달라집니다.")
++
++
+     # ============================
+     # Tab 4: 수요-공급 분석기 (구 수식 계산기)
+     # ============================
+diff --git a/build_cache.py b/build_cache.py
+index bd5a519..26d0865 100644
+--- a/build_cache.py
++++ b/build_cache.py
+@@ -8,8 +8,8 @@ import time
+ sys.path.insert(0, os.path.dirname(__file__))
+ 
+ from data_loader import (
+-    load_apt_data, load_apt_data_detail, load_rent_data,
+-    APT_CACHE_PARQUET, APT_DETAIL_CACHE_PARQUET,
++    load_apt_data, load_apt_complex_data, load_apt_data_detail, load_rent_data,
++    APT_CACHE_PARQUET, APT_COMPLEX_CACHE_PARQUET, APT_DETAIL_CACHE_PARQUET,
+     JEONSE_CACHE_PARQUET, WOLSE_CACHE_PARQUET, RENT_ALL_CACHE_PARQUET,
+ )
+ 
+@@ -17,24 +17,32 @@ print("=== 아파트 실거래 데이터 캐시 빌드 시작 ===")
+ start = time.time()
+ 
+ # 1. 기존 시군구 월별 집계 캐시
+-print("\n[1/5] 매매 시군구 월별 집계...")
++print("\n[1/6] 매매 시군구 월별 집계...")
+ df = load_apt_data(force_rebuild=True, chunksize=500_000)
+ elapsed = time.time() - start
+ print(f"  Shape: {df.shape} ({elapsed:.1f}초)")
+ if "시도" in df.columns:
+     print(f"  시도별 거래량: {df.groupby('시도')['거래량'].sum().nlargest(5).to_dict()}")
+ 
+-# 2. 건축년도 포함 상세 캐시
+-print("\n[2/5] 매매 상세 캐시 (건축년도 포함)...")
++# 2. 단지 월별 캐시
++print("\n[2/6] 매매 단지 월별 집계...")
++t2 = time.time()
++df_complex = load_apt_complex_data(force_rebuild=True, chunksize=500_000)
++print(f"  Shape: {df_complex.shape} ({time.time()-t2:.1f}초)")
++if not df_complex.empty:
++    print(f"  단지 수: {df_complex[['지역코드', '법정동', '아파트']].drop_duplicates().shape[0]:,}")
++
++# 3. 건축년도 포함 상세 캐시
++print("\n[3/6] 매매 상세 캐시 (건축년도 포함)...")
+ t2 = time.time()
+ df_detail = load_apt_data_detail(force_rebuild=True, chunksize=500_000)
+ print(f"  Shape: {df_detail.shape} ({time.time()-t2:.1f}초)")
+ if "건축년도" in df_detail.columns and len(df_detail) > 0:
+     print(f"  건축년도 범위: {df_detail['건축년도'].min():.0f} ~ {df_detail['건축년도'].max():.0f}")
+ 
+-# 3~5. 임대차 캐시
+-for i, rtype in enumerate(["jeonse", "wolse", "all"], 3):
+-    print(f"\n[{i}/5] {rtype} 캐시...")
++# 4~6. 임대차 캐시
++for i, rtype in enumerate(["jeonse", "wolse", "all"], 4):
++    print(f"\n[{i}/6] {rtype} 캐시...")
+     t = time.time()
+     rdf = load_rent_data(rtype, force_rebuild=True, chunksize=500_000)
+     print(f"  Shape: {rdf.shape} ({time.time()-t:.1f}초)")
+@@ -44,6 +52,7 @@ print(f"\n=== 전체 빌드 완료 ({total:.1f}초) ===")
+ 
+ for path, name in [
+     (APT_CACHE_PARQUET, "매매 집계"),
++    (APT_COMPLEX_CACHE_PARQUET, "매매 단지 월별"),
+     (APT_DETAIL_CACHE_PARQUET, "매매 상세(건축년도)"),
+     (JEONSE_CACHE_PARQUET, "전세"),
+     (WOLSE_CACHE_PARQUET, "월세"),
+diff --git "a/codex/260718_\353\214\200\354\236\245\354\225\204\355\214\214\355\212\270\355\203\255_plan_codex.md" "b/codex/260718_\353\214\200\354\236\245\354\225\204\355\214\214\355\212\270\355\203\255_plan_codex.md"
+new file mode 100644
+index 0000000..41e0583
+--- /dev/null
++++ "b/codex/260718_\353\214\200\354\236\245\354\225\204\355\214\214\355\212\270\355\203\255_plan_codex.md"
+@@ -0,0 +1,80 @@
++# 대장아파트 탭 구현 계획
++
++## 1. 요구 재진술과 가정
++
++- 요구: 전국 시군구별로 거래가 충분히 활발한 단지 중 평당가격이 높은 대표 아파트를 선정하고, 선택한 구의 대표 단지 가격·거래량 흐름을 보여주는 독립 기능 탭을 추가한다.
++- 가정 1: 단지 선정은 최신 데이터월 기준 최근 24개월을 기본 관찰기간으로 한다.
++- 가정 2: "거래량이 많고 평당가격이 가장 높은"은 구별 거래량 상위 30%이면서 최소 3건 이상인 단지를 후보로 삼고, 후보 중 거래량 가중 평균 평당가격이 가장 높은 단지를 선택하는 방식으로 정량화한다.
++- 가정 3: 평당가격은 원본의 거래금액(만원) / 전용면적(m²) × 3.305785로 계산한다.
++- 가정 4: 같은 이름의 단지를 구분하기 위해 지역코드 + 법정동 + 아파트명을 단지 식별자로 사용한다.
++- 가정 5: 해제된 거래와 가격·면적·지역·단지명이 유효하지 않은 행은 집계에서 제외한다.
++
++## 2. 작업 분해
++
++1. 단지 월별 캐시 로더 구현
++   - `data_loader.py`에 단지 월별 Parquet 경로와 청크 집계 로더를 추가한다.
++   - 산출 컬럼: 시도, 지역코드, 법정동, 아파트, 연도, 월, 연월, 평균가격, 거래량, 평균단가_per_m2, 평균평당가격.
++   - 여러 청크에 걸친 같은 단지는 거래량 가중 평균으로 다시 합친다.
++2. 대장아파트 선정 로직 구현
++   - 신규 `leader_apartment.py`에 입력 검증, 최근 N개월 필터, 구별 후보/대표 선정, 대표 단지 전체 월별 흐름 추출 함수를 둔다.
++   - 선정 결과에 관찰기간, 거래량, 평균평당가격, 후보 내 순위/근거를 포함한다.
++3. Streamlit 독립 페이지 추가
++   - `app.py` 상위 segmented navigation의 거래현황 다음에 `🧭 대장아파트`를 추가한다.
++   - 시도·구·관찰기간·최소 거래건수 선택, 구별 대표 단지 표, KPI, 평당가격 라인 + 거래량 막대 흐름을 제공한다.
++   - 데이터 부재·후보 부재를 명시적으로 안내하고 기존 다크 테마/차트 등록 패턴을 따른다.
++4. 배포 캐시 생성 경로 보강
++   - `build_cache.py`에 새 단지 캐시 빌드를 포함하고 실제 원본에서 `cache/apt_complex_monthly.parquet`를 생성한다.
++5. 테스트 추가·정비
++   - 신규 순수함수 단위 테스트로 거래량 부족 고가 단지 제외, 구별 선정, 동명 단지 분리, 결정적 동률 처리, 흐름 추출을 검증한다.
++   - 앱 정적 테스트에서 신규 페이지·가이드·차트 계약을 확인한다.
++   - 현재 segmented navigation과 불일치하는 기존 탭 순서 정적 테스트를 현 구조에 맞게 최소 수정한다.
++
++## 3. 리스크와 함정
++
++- `app.py`에는 사용자 미커밋 변경 466줄이 있으므로 기존 변경을 유지하고 신규 블록만 좁게 패치한다.
++- 원본 CSV는 약 911MB이며 배포 환경에는 존재하지 않는다. 앱 실행 중 원본을 읽지 않고 사전 생성 Parquet만 사용해야 한다.
++- 단순 최고 평당가 방식은 1건짜리 이상치 단지를 뽑을 수 있으므로 거래량 후보군을 먼저 제한한다.
++- 청크별 평균을 단순 평균하면 왜곡되므로 반드시 거래량 가중 재집계한다.
++- 최신 24개월만으로 대표를 선정하되, 선정된 단지의 흐름 차트는 사용자가 선택한 전체 표시기간을 사용한다.
++- 파일 이동·삭제·외부 배포·커밋은 하지 않는다. 실제 Streamlit Cloud 반영은 별도 커밋/푸시가 필요하다.
++- 새 Parquet가 GitHub/Streamlit Cloud 파일 크기 한도를 넘는지 생성 후 확인한다.
++
++## 4. 완료 기준
++
++- [x] 251개 지역코드 중 유효 거래가 있는 구에 대해 대표 단지 선정 결과가 결정적으로 생성된다.
++- [x] 거래량 기준 미달인 1건짜리 고가 단지가 대표로 잘못 선정되지 않는다.
++- [x] `🧭 대장아파트` 페이지에서 시도·구를 선택하면 대표 단지명, 최근 관찰기간 거래량, 평균 평당가격, 월별 가격·거래량 흐름이 표시된다.
++- [x] 배포 환경에서 원본 OneDrive 없이 새 Parquet 캐시만으로 페이지 데이터가 로드된다.
++- [x] 새 캐시와 기존 캐시의 지역·월별 거래량 합계가 허용 오차 없이 일치하거나, 해제거래 제외 차이가 설명된다.
++- [x] Python 문법 검사와 관련 pytest가 모두 통과한다.
++- [x] 변경 이름/컬럼에 잘못된 잔존 참조가 없다.
++
++## 5. 검증 방법
++
++1. 완료기준 대조
++   - synthetic DataFrame 테스트와 실제 캐시 집계에서 구별 대표 결과 건수·단지명·선정 근거를 확인한다.
++   - 새 캐시를 임시로 원본 경로와 분리한 상태에서 loader가 Parquet만 읽는지 확인한다.
++2. 잔존 참조 grep
++   - `rg`로 신규 탭명, loader명, 캐시 경로, 컬럼명을 확인하고 임시명/옛 탭 가정이 남지 않았는지 점검한다.
++3. 실행 테스트
++   - `python -m py_compile app.py data_loader.py leader_apartment.py build_cache.py`
++   - 관련 단위·정적 테스트와 전체 `pytest -q`
++   - `streamlit run app.py --server.headless true` 기동 후 HTTP 상태 확인
++   - 새 Parquet 스키마·크기·최신월·지역수·거래량 합계 대조
++
++## 계획 자가검토
++
++- [x] 입력 확인: 작업공간 지침, `app.py` navigation/차트 패턴, `data_loader.py` 원본/캐시 경로, 실제 캐시 스키마, 원본 CSV 헤더를 확인했다.
++- [x] 범위 확인: 요청한 단지 선정과 흐름 화면, 이를 배포에서 작동시키는 캐시·테스트만 포함한다.
++- [x] 단순성 확인: 기존 시군구 캐시를 변형하지 않고 별도 단지 월별 캐시를 추가해 기존 기능 영향과 정본 이중화를 최소화한다.
++- [x] 비가역 단계 확인: 삭제·이동·커밋·푸시·배포는 포함하지 않는다. L 규모 구현 착수 전 사용자 승인을 받는다.
++
++## 실행 결과
++
++- 2026-07-19 승인 후 구현했다.
++- 실제 단지 캐시: 3,415,350행, 44,918단지, 251개 지역코드, 67.8MB.
++- 원본 범위: 2006-01~2026-04, 결측·중복·0 이하 가격/거래량 0건.
++- 해제거래 제외로 기존 시군구 캐시보다 167,824건(1.488%) 적으며 의도된 차이다.
++- 지역별 최신월을 기준으로 선정해 251개 지역 모두 결과를 생성하고, 전국 최신월보다 늦은 지역은 지연 개월 수를 표시한다.
++- `python -m pytest -q`: 81 passed, 기존 pandas FutureWarning 4건.
++- Streamlit 헤드리스 기동: health `ok`, 초기 페이지 HTTP 200.
+diff --git "a/codex/260719_\353\214\200\354\236\245\354\225\204\355\214\214\355\212\270\355\203\255_\354\210\230\354\240\225\354\202\254\355\225\255_codex_v2.md" "b/codex/260719_\353\214\200\354\236\245\354\225\204\355\214\214\355\212\270\355\203\255_\354\210\230\354\240\225\354\202\254\355\225\255_codex_v2.md"
+new file mode 100644
+index 0000000..47e0f63
+--- /dev/null
++++ "b/codex/260719_\353\214\200\354\236\245\354\225\204\355\214\214\355\212\270\355\203\255_\354\210\230\354\240\225\354\202\254\355\225\255_codex_v2.md"
+@@ -0,0 +1,90 @@
++# 대장아파트 탭 수정사항 Codex v2
++
++## 버전 구분
++
++| 버전 | 이름 | 내용 | 복구 수단 |
++|---|---|---|---|
++| v1 | `260708_부동산대시보드_단순화_claude_v1` | KPI 3개 단순화, 수식 고급 모드, 선행 신호 접기까지의 기준본 | Git 커밋·태그·Claude v1 패치 |
++| v2 | `260719_대장아파트탭_codex_v2` | 구별 대장아파트 선정, 가격·거래량 흐름, 단지 캐시 및 테스트 | Git 커밋·태그·Codex v2 패치 |
++
++## 구현 내용
++
++### 1. 선정 기준
++
++- 지역별 최신월부터 최근 24개월을 기본 관찰기간으로 사용한다.
++- 구별 거래량 상위 30%이면서 최소 3건 이상인 단지를 후보로 삼는다.
++- 후보 중 거래량 가중 평균 평당가격이 가장 높은 단지를 대장아파트로 선정한다.
++- 동률은 거래량 내림차순, 법정동·아파트명 오름차순으로 결정해 결과를 고정한다.
++- 평당가격은 `거래금액 ÷ 전용면적(m²) × 3.305785`로 계산한다.
++- 실거래 신고 해제 건과 가격·면적·지역·단지명이 유효하지 않은 행은 제외한다.
++
++### 2. 화면
++
++- 상위 navigation에서 `🧭 거래현황` 다음에 `🧭 대장아파트`를 추가했다.
++- 시도, 관찰기간 12/24/36/60개월, 최소 거래건수를 선택할 수 있다.
++- 시군구별 대장아파트, 관찰기간 거래량, 평균 평당가격, 평균 거래가격, 후보/전체 단지 수를 표로 보여준다.
++- 선택한 구의 대장아파트 월별 평당가격을 선, 거래량을 막대로 함께 보여준다.
++- 전국 최신월보다 원천 데이터가 늦은 지역은 `N개월 지연`으로 표시한다.
++
++### 3. 배포 데이터
++
++- 신규 캐시: `cache/apt_complex_monthly.parquet`
++- 크기: 67.8MB
++- 행 수: 3,415,350행
++- 단지 수: 44,918개
++- 지역코드: 251개
++- 기간: 2006-01~2026-04
++- 총 거래량: 11,107,737건
++- 기존 캐시와의 차이: 167,824건(1.488%) 감소. 해제거래를 제외한 의도된 차이이다.
++
++## 데이터 품질 확인
++
++- 필수 컬럼 결측: 0건
++- 단지·월 중복: 0건
++- 0 이하 가격·평당가격·거래량: 0건
++- 빈 단지명: 0건
++- 251개 지역 모두 대장아파트 선정 결과 생성
++- 2026-04 기준 지연 지역도 지역별 최신월로 선정하되 지연 상태를 함께 표시
++
++## 검증 결과
++
++- `python -m py_compile app.py data_loader.py leader_apartment.py build_cache.py`: 통과
++- `python -m pytest -q`: 81 passed
++- 관련 신규·정적 테스트: 18 passed
++- Streamlit headless health: `ok`
++- 초기 페이지 응답: HTTP 200
++- `git diff --check`(생성형 `.patch` 파일 제외): 통과
++
++## 복구 방법
++
++### v1을 별도 상태로 확인
++
++```bash
++git switch --detach 260708_부동산대시보드_단순화_claude_v1
++```
++
++### v2로 복귀
++
++```bash
++git switch main
++```
++
++### 패치 파일
++
++- v1: `codex/260708_부동산대시보드_단순화_claude_v1.patch`
++- v2 코드·문서: `codex/260719_대장아파트탭_codex_v2.patch`
++
++v2 패치는 용량 중복을 막기 위해 67.8MB Parquet를 제외한 코드·문서 패치다. 캐시까지 포함한 전체 상태 복구는 Git 태그 `260719_대장아파트탭_codex_v2`를 사용한다.
++
++## 변경 파일
++
++- `app.py`
++- `data_loader.py`
++- `leader_apartment.py`
++- `build_cache.py`
++- `cache/apt_complex_monthly.parquet`
++- `tests/test_leader_apartment.py`
++- `tests/test_app_static.py`
++- `tests/test_app_buy_decision_static.py`
++- `codex/260718_대장아파트탭_plan_codex.md`
++- `codex/260719_대장아파트탭_수정사항_codex_v2.md`
+diff --git a/data_loader.py b/data_loader.py
+index f5f8656..31d45f3 100644
+--- a/data_loader.py
++++ b/data_loader.py
+@@ -81,6 +81,7 @@ MOVEIN_PLAN_PATH = os.path.join(_PROJECT_ROOT, "data", "supply", "movein_plan_co
+ # 캐시 경로
+ CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+ APT_CACHE_PARQUET = os.path.join(CACHE_DIR, "apt_sigungu_monthly.parquet")
++APT_COMPLEX_CACHE_PARQUET = os.path.join(CACHE_DIR, "apt_complex_monthly.parquet")
+ 
+ # KOSIS 연령대별/성별 인구 (시도, 연간) 경로 — CACHE_DIR 정의 후 배치
+ KOSIS_AGE_POP_PATH = os.path.join(CACHE_DIR, "kosis_population_age_sido_yearly.csv")
+@@ -227,6 +228,10 @@ def read_csv_auto(path, **kwargs):
+     """인코딩 자동 감지 CSV 로더 (utf-8 → cp949 → euc-kr)"""
+     for enc in ("utf-8", "cp949", "euc-kr"):
+         try:
++            # chunksize 사용 시 pd.read_csv가 실제 반복 전까지 디코딩을 미루므로
++            # 앞부분을 먼저 읽어 잘못된 인코딩의 TextFileReader 반환을 막는다.
++            with open(path, "r", encoding=enc) as handle:
++                handle.read(65_536)
+             return pd.read_csv(path, encoding=enc, **kwargs)
+         except UnicodeDecodeError:
+             continue
+@@ -355,6 +360,111 @@ def load_apt_data(chunksize=500_000, keep_sido=True, force_rebuild=False):
+     return result
+ 
+ 
++def load_apt_complex_data(chunksize=500_000, force_rebuild=False):
++    """아파트 실거래를 단지·월 단위로 집계한다.
++
++    배포 환경에서는 사전 생성한 Parquet만 읽고, 로컬에서 캐시를 재빌드할 때만
++    원본 CSV를 청크 처리한다. 해제된 거래와 유효하지 않은 가격·면적은 제외한다.
++
++    Returns:
++        DataFrame [시도, 지역코드, 법정동, 아파트, 연도, 월, 연월,
++                   평균가격, 거래량, 평균단가_per_m2, 평균평당가격]
++    """
++    os.makedirs(CACHE_DIR, exist_ok=True)
++
++    if (not force_rebuild) and os.path.exists(APT_COMPLEX_CACHE_PARQUET):
++        return pd.read_parquet(APT_COMPLEX_CACHE_PARQUET)
++
++    if not os.path.exists(APT_PATH):
++        return pd.DataFrame()
++
++    chunks = []
++    reader = read_csv_auto(
++        APT_PATH,
++        chunksize=chunksize,
++        dtype=str,
++        usecols=[
++            "년", "월", "지역코드", "법정동", "아파트", "단지",
++            "전용면적", "거래금액", "해제여부",
++        ],
++        on_bad_lines="skip",
++    )
++
++    for chunk in reader:
++        chunk["지역코드"] = chunk["지역코드"].astype(str).str.strip().str.zfill(5)
++        chunk["법정동"] = chunk["법정동"].fillna("").astype(str).str.strip()
++        chunk["아파트"] = (
++            chunk["아파트"].replace("", np.nan)
++            .fillna(chunk["단지"])
++            .fillna("")
++            .astype(str)
++            .str.strip()
++        )
++        chunk["년_num"] = pd.to_numeric(chunk["년"], errors="coerce")
++        chunk["월_num"] = pd.to_numeric(chunk["월"], errors="coerce")
++        chunk["거래금액_num"] = chunk["거래금액"].apply(_clean_amount)
++        chunk["전용면적_num"] = pd.to_numeric(chunk["전용면적"], errors="coerce")
++
++        cancel_flag = chunk["해제여부"].fillna("").astype(str).str.strip()
++        chunk = chunk[cancel_flag == ""]
++        chunk = chunk.dropna(
++            subset=["년_num", "월_num", "거래금액_num", "전용면적_num"]
++        )
++        chunk = chunk[
++            (chunk["지역코드"] != "00000")
++            & (chunk["법정동"] != "")
++            & (chunk["아파트"] != "")
++            & (chunk["거래금액_num"] > 0)
++            & (chunk["전용면적_num"] > 0)
++            & chunk["월_num"].between(1, 12)
++        ].copy()
++        if chunk.empty:
++            continue
++
++        chunk["시도"] = chunk["지역코드"].str[:2].apply(_sido_from_code).apply(_normalize_sido)
++        chunk["단가_per_m2"] = chunk["거래금액_num"] / chunk["전용면적_num"]
++        group_keys = ["시도", "지역코드", "법정동", "아파트", "년_num", "월_num"]
++        aggregated = (
++            chunk.groupby(group_keys, dropna=False, observed=True)
++            .agg(
++                거래금액합계=("거래금액_num", "sum"),
++                단가합계=("단가_per_m2", "sum"),
++                거래량=("거래금액_num", "count"),
++            )
++            .reset_index()
++        )
++        chunks.append(aggregated)
++
++    result_columns = [
++        "시도", "지역코드", "법정동", "아파트", "연도", "월", "연월",
++        "평균가격", "거래량", "평균단가_per_m2", "평균평당가격",
++    ]
++    if not chunks:
++        return pd.DataFrame(columns=result_columns)
++
++    result = pd.concat(chunks, ignore_index=True)
++    group_keys = ["시도", "지역코드", "법정동", "아파트", "년_num", "월_num"]
++    result = (
++        result.groupby(group_keys, dropna=False, observed=True)[
++            ["거래금액합계", "단가합계", "거래량"]
++        ]
++        .sum()
++        .reset_index()
++    )
++    result["평균가격"] = result["거래금액합계"] / result["거래량"]
++    result["평균단가_per_m2"] = result["단가합계"] / result["거래량"]
++    result["평균평당가격"] = result["평균단가_per_m2"] * 3.305785
++    result["연도"] = result["년_num"].astype(int)
++    result["월"] = result["월_num"].astype(int)
++    result["연월"] = result["연도"].astype(str) + "-" + result["월"].map(lambda value: f"{value:02d}")
++    result["거래량"] = result["거래량"].astype(int)
++    result = result[result_columns].sort_values(
++        ["시도", "지역코드", "법정동", "아파트", "연월"], kind="mergesort"
++    )
++    result.to_parquet(APT_COMPLEX_CACHE_PARQUET, index=False)
++    return result.reset_index(drop=True)
++
++
+ def load_apt_data_detail(chunksize=500_000, force_rebuild=False):
+     """
+     아파트 실거래 CSV → 시군구+연월+준공년차 단위 집계 (건축년도 포함 상세 캐시)
+diff --git a/leader_apartment.py b/leader_apartment.py
+new file mode 100644
+index 0000000..5b32c23
+--- /dev/null
++++ b/leader_apartment.py
+@@ -0,0 +1,173 @@
++"""시군구별 대장아파트 선정과 월별 흐름 추출."""
++
++from __future__ import annotations
++
++import pandas as pd
++
++
++PYEONG_PER_M2 = 3.305785
++COMPLEX_KEYS = ["시도", "지역코드", "법정동", "아파트"]
++REQUIRED_COLUMNS = [*COMPLEX_KEYS, "연월", "거래량", "평균가격", "평균단가_per_m2"]
++
++
++def _validate_columns(df: pd.DataFrame) -> None:
++    missing = [column for column in REQUIRED_COLUMNS if column not in df.columns]
++    if missing:
++        raise ValueError(f"단지 데이터 필수 컬럼이 없습니다: {', '.join(missing)}")
++
++
++def _prepare_complex_data(df: pd.DataFrame) -> pd.DataFrame:
++    """선정에 사용할 타입과 유효값을 정리한다."""
++    _validate_columns(df)
++    prepared = df.copy()
++    prepared["지역코드"] = prepared["지역코드"].astype(str).str.strip().str.zfill(5)
++    for column in ("시도", "법정동", "아파트"):
++        prepared[column] = prepared[column].fillna("").astype(str).str.strip()
++    for column in ("거래량", "평균가격", "평균단가_per_m2"):
++        prepared[column] = pd.to_numeric(prepared[column], errors="coerce")
++    prepared["연월_period"] = pd.to_datetime(
++        prepared["연월"].astype(str), format="%Y-%m", errors="coerce"
++    ).dt.to_period("M")
++    prepared = prepared.dropna(
++        subset=["연월_period", "거래량", "평균가격", "평균단가_per_m2"]
++    )
++    prepared = prepared[
++        (prepared["지역코드"] != "00000")
++        & (prepared["법정동"] != "")
++        & (prepared["아파트"] != "")
++        & (prepared["거래량"] > 0)
++        & (prepared["평균가격"] > 0)
++        & (prepared["평균단가_per_m2"] > 0)
++    ].copy()
++    prepared["평균평당가격"] = prepared["평균단가_per_m2"] * PYEONG_PER_M2
++    return prepared
++
++
++def _aggregate_complexes(df: pd.DataFrame) -> pd.DataFrame:
++    """월별 평균을 거래량 가중 평균으로 단지별 재집계한다."""
++    weighted = df.assign(
++        _가격합계=df["평균가격"] * df["거래량"],
++        _단가합계=df["평균단가_per_m2"] * df["거래량"],
++    )
++    aggregated = (
++        weighted.groupby(COMPLEX_KEYS, as_index=False, observed=True)
++        .agg(
++            거래량=("거래량", "sum"),
++            _가격합계=("_가격합계", "sum"),
++            _단가합계=("_단가합계", "sum"),
++        )
++    )
++    aggregated["평균가격"] = aggregated["_가격합계"] / aggregated["거래량"]
++    aggregated["평균단가_per_m2"] = aggregated["_단가합계"] / aggregated["거래량"]
++    aggregated["평균평당가격"] = aggregated["평균단가_per_m2"] * PYEONG_PER_M2
++    return aggregated.drop(columns=["_가격합계", "_단가합계"])
++
++
++def select_leader_apartments(
++    df: pd.DataFrame,
++    lookback_months: int = 24,
++    min_transactions: int = 3,
++    volume_quantile: float = 0.70,
++    as_of: str | pd.Period | None = None,
++) -> pd.DataFrame:
++    """시군구별 거래량 상위 후보 중 평당가격이 가장 높은 단지를 선정한다.
++
++    후보 기준은 관찰기간 거래량이 구별 ``volume_quantile`` 분위 이상이면서
++    ``min_transactions``건 이상인 단지다. 동률은 거래량 내림차순, 법정동과
++    아파트명 오름차순으로 정해 실행마다 같은 결과를 보장한다.
++    """
++    if lookback_months < 1:
++        raise ValueError("관찰기간은 1개월 이상이어야 합니다.")
++    if min_transactions < 1:
++        raise ValueError("최소 거래건수는 1건 이상이어야 합니다.")
++    if not 0 <= volume_quantile <= 1:
++        raise ValueError("거래량 분위 기준은 0과 1 사이여야 합니다.")
++
++    prepared = _prepare_complex_data(df)
++    if prepared.empty:
++        return pd.DataFrame()
++
++    latest = pd.Period(as_of, freq="M") if as_of is not None else prepared["연월_period"].max()
++    leader_rows: list[pd.Series] = []
++    for _, region_history in prepared.groupby(["시도", "지역코드"], sort=True, observed=True):
++        region_latest = min(latest, region_history["연월_period"].max())
++        region_start = region_latest - (lookback_months - 1)
++        region_window = region_history[
++            region_history["연월_period"].between(region_start, region_latest, inclusive="both")
++        ]
++        if region_window.empty:
++            continue
++        region = _aggregate_complexes(region_window)
++        volume_cutoff = float(region["거래량"].quantile(volume_quantile, interpolation="lower"))
++        threshold = max(float(min_transactions), volume_cutoff)
++        candidates = region[region["거래량"] >= threshold].copy()
++        if candidates.empty:
++            continue
++        candidates = candidates.sort_values(
++            ["평균평당가격", "거래량", "법정동", "아파트"],
++            ascending=[False, False, True, True],
++            kind="mergesort",
++        )
++        leader = candidates.iloc[0].copy()
++        leader["거래량기준"] = threshold
++        leader["후보단지수"] = len(candidates)
++        leader["전체단지수"] = len(region)
++        data_lag_months = latest.ordinal - region_latest.ordinal
++        leader["관찰시작"] = str(region_start)
++        leader["관찰종료"] = str(region_latest)
++        leader["전체최신월"] = str(latest)
++        leader["데이터경과개월"] = data_lag_months
++        leader["데이터상태"] = "최신" if data_lag_months == 0 else f"{data_lag_months}개월 지연"
++        leader_rows.append(leader)
++
++    if not leader_rows:
++        return pd.DataFrame()
++
++    result = pd.DataFrame(leader_rows)
++    result["거래량"] = result["거래량"].round().astype(int)
++    result["후보단지수"] = result["후보단지수"].astype(int)
++    result["전체단지수"] = result["전체단지수"].astype(int)
++    result["데이터경과개월"] = result["데이터경과개월"].astype(int)
++    return result.sort_values(["시도", "지역코드"], kind="mergesort").reset_index(drop=True)
++
++
++def get_leader_apartment_flow(
++    df: pd.DataFrame,
++    region_code: str,
++    legal_dong: str,
++    apartment: str,
++    start_year: int | None = None,
++    end_year: int | None = None,
++) -> pd.DataFrame:
++    """선정된 단지의 월별 평균가격·평당가격·거래량 흐름을 반환한다."""
++    prepared = _prepare_complex_data(df)
++    target = prepared[
++        (prepared["지역코드"] == str(region_code).strip().zfill(5))
++        & (prepared["법정동"] == str(legal_dong).strip())
++        & (prepared["아파트"] == str(apartment).strip())
++    ].copy()
++    if start_year is not None:
++        target = target[target["연월_period"].dt.year >= int(start_year)]
++    if end_year is not None:
++        target = target[target["연월_period"].dt.year <= int(end_year)]
++    if target.empty:
++        return pd.DataFrame()
++
++    target = target.assign(
++        _가격합계=target["평균가격"] * target["거래량"],
++        _단가합계=target["평균단가_per_m2"] * target["거래량"],
++    )
++    flow = (
++        target.groupby("연월", as_index=False, observed=True)
++        .agg(
++            거래량=("거래량", "sum"),
++            _가격합계=("_가격합계", "sum"),
++            _단가합계=("_단가합계", "sum"),
++        )
++        .sort_values("연월")
++    )
++    flow["평균가격"] = flow["_가격합계"] / flow["거래량"]
++    flow["평균단가_per_m2"] = flow["_단가합계"] / flow["거래량"]
++    flow["평균평당가격"] = flow["평균단가_per_m2"] * PYEONG_PER_M2
++    flow["거래량"] = flow["거래량"].round().astype(int)
++    return flow.drop(columns=["_가격합계", "_단가합계"]).reset_index(drop=True)
+diff --git a/tests/test_app_buy_decision_static.py b/tests/test_app_buy_decision_static.py
+index 5f10d0b..4e8bcc4 100644
+--- a/tests/test_app_buy_decision_static.py
++++ b/tests/test_app_buy_decision_static.py
+@@ -18,15 +18,20 @@ def _buy_decision_block() -> str:
+     return source[start:] if next_marker == -1 else source[start:next_marker]
+ 
+ 
+-def test_buy_decision_tab_is_inserted_immediately_after_overview():
+-    source = _source()
+-    assert "매수판단" in source
+-
+-    tab_call = re.search(r"st\.tabs\(\s*\[(.*?)\]\s*\)", source, flags=re.S)
+-    assert tab_call, "상위 st.tabs 목록을 찾을 수 없습니다"
+-    tab_labels = re.findall(r"[\"']([^\"']+)[\"']", tab_call.group(1))
+-
+-    assert tab_labels[:2] == ["Overview", "매수판단"]
++def test_buy_decision_and_leader_are_in_segmented_navigation():
++    tree = ast.parse(_source())
++    pages = None
++    for node in tree.body:
++        if isinstance(node, ast.Assign) and any(
++            isinstance(target, ast.Name) and target.id == "_PAGES" for target in node.targets
++        ):
++            pages = ast.literal_eval(node.value)
++            break
++
++    assert pages is not None, "상위 segmented navigation 목록을 찾을 수 없습니다"
++    assert pages[0] == "🧭 Overview"
++    assert "🔬 매수판단" in pages
++    assert pages.index("🧭 대장아파트") == pages.index("🧭 거래현황") + 1
+ 
+ 
+ def test_app_imports_buy_decision_view_model_or_region_compare():
+diff --git a/tests/test_app_static.py b/tests/test_app_static.py
+index 10aac2b..b0376a2 100644
+--- a/tests/test_app_static.py
++++ b/tests/test_app_static.py
+@@ -53,9 +53,26 @@ def test_listing_price_parser_replaces_old_first_number_extraction():
+ def test_top_level_tab_usage_guides_are_visible_to_users():
+     source = APP_PATH.read_text(encoding="utf-8")
+ 
+-    for tab_name in ["Overview", "매수판단", "수요공급분석", "거래현황", "매물현황", "자유차트"]:
++    for tab_name in ["Overview", "매수판단", "수요공급분석", "거래현황", "대장아파트", "매물현황", "자유차트"]:
+         assert f'"{tab_name}"' in source
+         assert f'render_tab_usage_guide("{tab_name}")' in source
+ 
+     assert "처음 보는 분을 위한 사용법" in source
+     assert "**예시**" in source
++
++
++def test_leader_apartment_page_contract_is_present():
++    source = APP_PATH.read_text(encoding="utf-8")
++
++    for text in [
++        '"🧭 대장아파트"',
++        'leader_apt_tab',
++        'get_apt_complex_data()',
++        'select_leader_apartments(',
++        'get_leader_apartment_flow(',
++        '"대장아파트_가격거래량"',
++        '"평균 평당가격"',
++        '"거래량"',
++        '"선정 기준과 주의사항"',
++    ]:
++        assert text in source
+diff --git a/tests/test_leader_apartment.py b/tests/test_leader_apartment.py
+new file mode 100644
+index 0000000..89fe015
+--- /dev/null
++++ b/tests/test_leader_apartment.py
+@@ -0,0 +1,147 @@
++import pandas as pd
++import pytest
++
++import data_loader
++from leader_apartment import get_leader_apartment_flow, select_leader_apartments
++
++
++def _row(
++    region_code,
++    apartment,
++    volume,
++    unit_price,
++    month="2025-12",
++    legal_dong="테스트동",
++    sido="서울",
++    average_price=100_000,
++):
++    return {
++        "시도": sido,
++        "지역코드": region_code,
++        "법정동": legal_dong,
++        "아파트": apartment,
++        "연월": month,
++        "거래량": volume,
++        "평균가격": average_price,
++        "평균단가_per_m2": unit_price,
++    }
++
++
++def test_selects_highest_unit_price_among_high_volume_candidates():
++    df = pd.DataFrame(
++        [
++            _row("11680", "초고가1건", 1, 2_000),
++            _row("11680", "활발한고가", 10, 1_000),
++            _row("11680", "최다거래중가", 20, 700),
++            _row("11710", "송파대표", 8, 900, legal_dong="잠실동"),
++        ]
++    )
++
++    leaders = select_leader_apartments(
++        df, lookback_months=24, min_transactions=3, volume_quantile=0.70
++    )
++
++    assert leaders.set_index("지역코드").loc["11680", "아파트"] == "활발한고가"
++    assert leaders.set_index("지역코드").loc["11710", "아파트"] == "송파대표"
++    assert "초고가1건" not in leaders["아파트"].tolist()
++
++
++def test_selection_uses_only_requested_lookback_window():
++    df = pd.DataFrame(
++        [
++            _row("11680", "과거대장", 100, 3_000, month="2022-01"),
++            _row("11680", "현재대장", 5, 900, month="2025-12"),
++        ]
++    )
++
++    leaders = select_leader_apartments(
++        df, lookback_months=12, min_transactions=3, volume_quantile=0.70, as_of="2025-12"
++    )
++
++    assert leaders.iloc[0]["아파트"] == "현재대장"
++    assert leaders.iloc[0]["관찰시작"] == "2025-01"
++    assert leaders.iloc[0]["관찰종료"] == "2025-12"
++
++
++def test_stale_region_uses_its_latest_month_and_is_flagged():
++    df = pd.DataFrame(
++        [
++            _row("11680", "현재단지", 5, 1_000, month="2025-12"),
++            _row("41590", "지연단지", 8, 800, month="2024-01", sido="경기"),
++        ]
++    )
++
++    leaders = select_leader_apartments(
++        df, lookback_months=12, min_transactions=1, volume_quantile=0, as_of="2025-12"
++    ).set_index("지역코드")
++
++    assert leaders.loc["41590", "관찰종료"] == "2024-01"
++    assert leaders.loc["41590", "데이터경과개월"] == 23
++    assert leaders.loc["41590", "데이터상태"] == "23개월 지연"
++
++
++def test_tie_break_is_deterministic_and_same_name_in_different_dong_is_separate():
++    df = pd.DataFrame(
++        [
++            _row("11680", "동명단지", 5, 1_000, legal_dong="나동"),
++            _row("11680", "동명단지", 5, 1_000, legal_dong="가동"),
++        ]
++    )
++
++    leaders = select_leader_apartments(df, min_transactions=1, volume_quantile=0)
++
++    assert leaders.iloc[0]["법정동"] == "가동"
++    assert leaders.iloc[0]["전체단지수"] == 2
++
++
++def test_flow_reaggregates_duplicate_months_with_volume_weights():
++    df = pd.DataFrame(
++        [
++            _row("11680", "대표", 1, 1_000, month="2025-01", average_price=100_000),
++            _row("11680", "대표", 3, 2_000, month="2025-01", average_price=200_000),
++            _row("11680", "대표", 2, 2_500, month="2025-02", average_price=250_000),
++        ]
++    )
++
++    flow = get_leader_apartment_flow(df, "11680", "테스트동", "대표", 2025, 2025)
++
++    january = flow.set_index("연월").loc["2025-01"]
++    assert january["거래량"] == 4
++    assert january["평균가격"] == pytest.approx(175_000)
++    assert january["평균단가_per_m2"] == pytest.approx(1_750)
++
++
++def test_missing_required_column_raises_clear_error():
++    with pytest.raises(ValueError, match="필수 컬럼"):
++        select_leader_apartments(pd.DataFrame({"연월": ["2025-01"]}))
++
++
++def test_complex_loader_builds_cache_and_excludes_cancelled_trade(tmp_path, monkeypatch):
++    raw_path = tmp_path / "apt.csv"
++    cache_path = tmp_path / "apt_complex_monthly.parquet"
++    raw = pd.DataFrame(
++        [
++            {
++                "년": "2025", "월": "1", "지역코드": "11680", "법정동": "대치동",
++                "아파트": "테스트", "단지": "", "전용면적": "84", "거래금액": "120,000",
++                "해제여부": "",
++            },
++            {
++                "년": "2025", "월": "1", "지역코드": "11680", "법정동": "대치동",
++                "아파트": "테스트", "단지": "", "전용면적": "84", "거래금액": "130,000",
++                "해제여부": "O",
++            },
++        ]
++    )
++    raw.to_csv(raw_path, index=False, encoding="cp949")
++    monkeypatch.setattr(data_loader, "APT_PATH", str(raw_path))
++    monkeypatch.setattr(data_loader, "APT_COMPLEX_CACHE_PARQUET", str(cache_path))
++
++    result = data_loader.load_apt_complex_data(chunksize=1, force_rebuild=True)
++
++    assert result.shape[0] == 1
++    assert result.iloc[0]["거래량"] == 1
++    assert result.iloc[0]["평균가격"] == pytest.approx(120_000)
++    assert cache_path.exists()
++    cached = data_loader.load_apt_complex_data(force_rebuild=False)
++    pd.testing.assert_frame_equal(cached, result)
